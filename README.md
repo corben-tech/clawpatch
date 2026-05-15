@@ -1,4 +1,4 @@
-# clawpatch
+# 🩹 clawpatch
 
 Automated code review that lands fixes.
 
