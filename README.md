@@ -13,7 +13,7 @@ resulting worktree changes.
 ## Install
 
 ```bash
-pnpm add -g @openclaw/clawpatch
+pnpm add -g clawpatch
 ```
 
 From source:

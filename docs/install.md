@@ -8,13 +8,13 @@ description: "How to install clawpatch from npm or source"
 ## npm/pnpm
 
 ```bash
-pnpm add -g @openclaw/clawpatch
+pnpm add -g clawpatch
 ```
 
 Or with npm:
 
 ```bash
-npm install -g @openclaw/clawpatch
+npm install -g clawpatch
 ```
 
 Verify:

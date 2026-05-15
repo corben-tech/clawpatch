@@ -1,15 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 - 2026-05-15
 
 - Added finding queue commands, triage history, bulk revalidation filters, and stricter review evidence/test-analysis fields.
 - Fixed unsupported command-specific flags being accepted and ignored by commands that do not implement them.
 - Fixed value-taking CLI flags so a following option token is reported as a missing value instead of consumed.
 - Fixed packaging and lint wiring so npm packs rebuild `dist/` and `pnpm lint` loads `oxlint.json` without warning noise.
 - Fixed package bin mapping so generated `dist`/`build` entries prefer matching TypeScript source files.
-
-## 0.1.0 - 2026-05-15
-
 - Added the initial strict TypeScript `clawpatch` CLI scaffold with `init`, `map`, `status`, `review`, `report`, `fix`, `revalidate`, `doctor`, and `clean-locks`.
 - Added feature-centered state, Codex CLI provider integration, strict provider schemas, tests, docs, and a static website draft.
 - Added SwiftPM and Rust/Cargo project detection, default commands, and deterministic feature mapping.

@@ -50,7 +50,7 @@
   <g transform="translate(350, 450)">
     <rect width="460" height="60" rx="30" fill="#ff6b4a" opacity="0.1"/>
     <text x="230" y="40" font-family="JetBrains Mono, monospace" font-size="22" font-weight="500" fill="#ff6b4a" text-anchor="middle">
-      npm install @openclaw/clawpatch
+      npm install clawpatch
     </text>
   </g>
 

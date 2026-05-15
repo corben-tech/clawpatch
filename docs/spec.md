@@ -32,7 +32,7 @@ Automated code review that lands fixes.
 ## Package
 
 - repo: `openclaw/clawpatch`
-- npm package: `@openclaw/clawpatch`
+- npm package: `clawpatch`
 - CLI bin: `clawpatch`
 - runtime: Node.js
 - language: strict TypeScript
