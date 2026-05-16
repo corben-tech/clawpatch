@@ -16,6 +16,7 @@ import {
   clearFeatureLockFiles,
   ensureStateDirs,
   readFeatures,
+  readFeatureLockIds,
   readFinding,
   readFindings,
   readPatchAttempts,
@@ -116,12 +117,19 @@ export async function mapCommand(
 
 export async function statusCommand(context: AppContext): Promise<unknown> {
   const loaded = await loadProjectState(context);
-  const [features, findings, runs, git] = await Promise.all([
+  const [features, findings, runs, git, lockFileIds] = await Promise.all([
     readFeatures(loaded.paths),
     readFindings(loaded.paths),
     readRuns(loaded.paths),
     discoverGit(loaded.root),
+    readFeatureLockIds(loaded.paths),
   ]);
+  const activeLockIds = new Set(
+    features.flatMap((feature) => (feature.lock === null ? [] : [feature.featureId])),
+  );
+  for (const id of lockFileIds) {
+    activeLockIds.add(id);
+  }
   return {
     project: loaded.project.name,
     branch: git.currentBranch,
@@ -129,7 +137,8 @@ export async function statusCommand(context: AppContext): Promise<unknown> {
     features: features.length,
     findings: findings.length,
     openFindings: findings.filter((finding) => finding.status === "open").length,
-    activeLocks: features.filter((feature) => feature.lock !== null).length,
+    activeLocks: activeLockIds.size,
+    lockFiles: lockFileIds.length,
     lastRun: runs.at(-1)?.runId ?? null,
   };
 }

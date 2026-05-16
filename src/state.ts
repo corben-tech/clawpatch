@@ -141,22 +141,22 @@ export async function releaseFeatureLock(paths: StatePaths, featureId: string): 
 }
 
 export async function clearFeatureLockFiles(paths: StatePaths): Promise<number> {
+  const lockIds = await readFeatureLockIds(paths);
+  for (const id of lockIds) {
+    await releaseFeatureLock(paths, id);
+  }
+  return lockIds.length;
+}
+
+export async function readFeatureLockIds(paths: StatePaths): Promise<string[]> {
   if (!(await pathExists(paths.locks))) {
-    return 0;
+    return [];
   }
-  let cleared = 0;
-  for (const name of await readdir(paths.locks)) {
-    if (!name.endsWith(".json")) {
-      continue;
-    }
-    await unlink(join(paths.locks, name)).catch((error: unknown) => {
-      if (!isNodeError(error, "ENOENT")) {
-        throw error;
-      }
-    });
-    cleared += 1;
-  }
-  return cleared;
+  const names = await readdir(paths.locks);
+  return names
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => name.slice(0, -".json".length))
+    .toSorted();
 }
 
 export async function readFindings(paths: StatePaths): Promise<FindingRecord[]> {

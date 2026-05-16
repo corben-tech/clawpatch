@@ -22,7 +22,7 @@ import { GlobalOptions } from "./config.js";
 
 const moduleRequire = createRequire(import.meta.url);
 
-async function main(argv: string[]): Promise<void> {
+export async function main(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv);
   if (parsed.help) {
     printHelp(parsed.command);

@@ -15,7 +15,7 @@ import {
   statusCommand,
   triageCommand,
 } from "./app.js";
-import { packageVersion, parseArgs } from "./cli.js";
+import { main, packageVersion, parseArgs } from "./cli.js";
 import { loadConfig } from "./config.js";
 import { runCommand } from "./exec.js";
 import {
@@ -760,6 +760,66 @@ describe("workflow", () => {
     expect(await readdir(paths.locks)).toEqual([]);
   });
 
+  it("surfaces crash-window lock files in status", async () => {
+    const root = await fixtureRoot("clawpatch-file-lock-status-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "file-lock-status", bin: { clean: "src/index.ts" } }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 1;\n");
+    const context = await makeContext(testOptions(root));
+    const paths = statePaths(join(root, ".clawpatch"));
+
+    await initCommand(context, {});
+    await mapCommand(context);
+    const feature = (await readFeatures(paths))[0];
+    expect(feature).toBeDefined();
+    await writeFixture(
+      root,
+      `.clawpatch/locks/${feature!.featureId}.json`,
+      `${JSON.stringify({
+        lockedByRunId: "interrupted",
+        lockedAt: new Date().toISOString(),
+        hostname: "test",
+        pid: 1,
+      })}\n`,
+    );
+
+    expect(await statusCommand(context)).toMatchObject({ activeLocks: 1, lockFiles: 1 });
+  });
+
+  it("cleans interrupted review locks through the CLI entrypoint", async () => {
+    const root = await fixtureRoot("clawpatch-clean-locks-cli-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "clean-locks-cli", bin: { clean: "src/index.ts" } }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 1;\n");
+
+    await runCli(["--root", root, "init", "--json"]);
+    await runCli(["--root", root, "map", "--json"]);
+
+    const paths = statePaths(join(root, ".clawpatch"));
+    const feature = (await readFeatures(paths))[0];
+    expect(feature).toBeDefined();
+    await claimFeature(paths, feature!.featureId, {
+      lockedByRunId: "interrupted",
+      lockedAt: new Date().toISOString(),
+      hostname: "test",
+      pid: 1,
+    });
+
+    const output = await runCli(["--root", root, "clean-locks", "--json"]);
+    const cleaned = (await readFeatures(paths))[0];
+
+    expect(JSON.parse(output)).toMatchObject({ cleared: 1, lockFilesCleared: 1 });
+    expect(cleaned?.status).toBe("pending");
+    expect(cleaned?.lock).toBeNull();
+    expect(await readdir(paths.locks)).toEqual([]);
+  });
+
   it("filters state files from successful fix results", async () => {
     const root = await fixtureRoot("clawpatch-filter-state-");
     await runCommand(
@@ -1048,3 +1108,19 @@ describe("workflow", () => {
     delete process.env["CLAWPATCH_PROVIDER"];
   });
 });
+
+async function runCli(argv: string[]): Promise<string> {
+  let output = "";
+  const stdout = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    output += chunk.toString();
+    return true;
+  }) as typeof process.stdout.write);
+  try {
+    await main(argv);
+    return output;
+  } finally {
+    stdout.mockRestore();
+  }
+}
