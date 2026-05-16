@@ -297,7 +297,7 @@ async function kotlinRoleSeeds(
     return [];
   }
   const projectPackages = await gradleProjectPackages(root, sourceFiles, kotlinFiles);
-  const kotlinPackageTypes = kotlinPackageDeclarations(kotlinFiles);
+  const kotlinPackageTypes = await kotlinPackageDeclarations(root, sourceFiles, kotlinFiles);
 
   for (const { filePath, info } of kotlinFiles) {
     const frameworkEvidence = kotlinFrameworkRoleEvidence(
@@ -410,11 +410,23 @@ async function gradleProjectPackages(
   return packages;
 }
 
-function kotlinPackageDeclarations(
+async function kotlinPackageDeclarations(
+  root: string,
+  sourceFiles: string[],
   kotlinFiles: Array<{ filePath: string; info: KotlinFileInfo }>,
-): Map<string, Set<string>> {
+): Promise<Map<string, Set<string>>> {
   const declarations = new Map<string, Set<string>>();
   for (const { info } of kotlinFiles) {
+    const packageName = info.packageName ?? "";
+    const packageTypes = declarations.get(packageName) ?? new Set<string>();
+    for (const declaration of info.declarations) {
+      packageTypes.add(declaration.name);
+    }
+    declarations.set(packageName, packageTypes);
+  }
+  for (const filePath of sourceFiles.filter((file) => file.endsWith(".java"))) {
+    const source = await readFile(join(root, filePath), "utf8");
+    const info = parseJavaFile(source);
     const packageName = info.packageName ?? "";
     const packageTypes = declarations.get(packageName) ?? new Set<string>();
     for (const declaration of info.declarations) {
@@ -1437,8 +1449,16 @@ function hasAppliedAndroidPlugin(buildSource: string): boolean {
       if (/\bapply\s+false\b/u.test(line)) {
         return false;
       }
-      return /\bid\s*\(?\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\)?/u.test(
-        line,
+      return (
+        /\bid\s*\(?\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\)?/u.test(
+          line,
+        ) ||
+        /\bapply\s+plugin:\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']/u.test(
+          line,
+        ) ||
+        /\bapply\s*\(\s*plugin\s*=\s*["']com\.android\.(?:application|library|dynamic-feature|test)["']\s*\)/u.test(
+          line,
+        )
       );
     });
 }
