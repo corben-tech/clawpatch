@@ -31,6 +31,9 @@ Supported deterministic mappers today:
 - Node/TypeScript workspace packages from `package.json` workspaces, `pnpm-workspace.yaml`, and common package folders
 - Nx project metadata from `project.json`, including project names, source roots, project types, and target names
 - bounded Node/TypeScript source groups under `src/`, `lib/`, `app/`, `pages/`, and `scripts/`
+- React Router `<Route path element>` declarations and React components in
+  root or nested frontend packages such as `frontend/`, `client/`, `web/`,
+  workspaces, and packages under `apps/` or `packages/`
 - Next.js `app/` and `pages/` routes at the repo root or inside discovered monorepo projects
 - Go `cmd/*/main.go`
 - Go `internal/*` packages
@@ -73,6 +76,12 @@ clawpatch next --project web
 When an Nx project target is available, nearby tests use the project-scoped
 command, such as `yarn nx test web`, instead of a repository-wide test command.
 
+React mapping discovers packages with a React dependency, including common
+nested frontend directories. It maps React Router route declarations to the
+component they render when the component can be resolved from a local import or
+lazy import, and also maps page/component files under `src/pages` and
+`src/components` as UI-flow slices.
+
 Native app mappers use the same bounded grouping model. SwiftPM packages can be
 discovered below the repo root, Apple projects are grouped by Swift source area,
 and Gradle modules are grouped from `src/main`, `src/test`, and `src/androidTest`.
@@ -95,9 +104,9 @@ tuple, or set literals. FastAPI paths can be positional strings or literal
 pyright, and black.
 
 Ruby mapping covers project metadata, executables, source groups, RSpec and
-Minitest suites, and Rails app structure. Rails legacy `config/secrets.yml` is
-not mapped as reviewable config because it can contain provider-sensitive
-secrets.
+Minitest suites, and Rails app structure. Rails legacy `config/secrets.yml`,
+`config/database.yml`, and `config/initializers/secret_token.rb` are not mapped
+as reviewable config because they can contain provider-sensitive secrets.
 
 Known gaps:
 
