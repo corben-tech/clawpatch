@@ -995,6 +995,132 @@ describe("workflow", () => {
     delete process.env["CLAWPATCH_PROVIDER"];
   });
 
+  it("includes feature-specific validation in fix dry-run output", async () => {
+    const root = await fixtureRoot("clawpatch-feature-validation-dry-run-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "buggy", bin: { buggy: "src/index.ts" } }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
+    process.env["CLAWPATCH_PROVIDER"] = "mock";
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await mapCommand(context);
+    const reviewed = (await reviewCommand(context, { limit: "1" })) as { next: string };
+    const finding = reviewed.next.split(" ").at(-1) ?? "";
+    const paths = statePaths(join(root, ".clawpatch"));
+    const feature = (await readFeatures(paths))[0];
+    const featureCommand = 'node -e "process.exit(0)"';
+    await writeFeature(paths, {
+      ...feature!,
+      tests: [{ path: "src/index.test.ts", command: featureCommand }],
+    });
+    const fixed = await fixCommand(context, { finding, dryRun: true });
+    const patches = await readPatchAttempts(paths);
+
+    expect(fixed).toMatchObject({ dryRun: true, validation: featureCommand });
+    expect(patches).toEqual([]);
+    delete process.env["CLAWPATCH_PROVIDER"];
+  });
+
+  it("fails fix when feature-specific validation fails", async () => {
+    const root = await fixtureRoot("clawpatch-feature-validation-fail-");
+    await runCommand(
+      "git init -q && git config user.email test@example.com && git config user.name Test",
+      root,
+    );
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "buggy", bin: { buggy: "src/index.ts" } }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
+    await runCommand(
+      "git add package.json src/index.ts && git -c commit.gpgsign=false commit -q -m init",
+      root,
+    );
+    process.env["CLAWPATCH_PROVIDER"] = "mock";
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await mapCommand(context);
+    const reviewed = (await reviewCommand(context, { limit: "1" })) as { next: string };
+    const finding = reviewed.next.split(" ").at(-1) ?? "";
+    const paths = statePaths(join(root, ".clawpatch"));
+    const feature = (await readFeatures(paths))[0];
+    const featureCommand = 'node -e "process.exit(7)"';
+    await writeFeature(paths, {
+      ...feature!,
+      tests: [{ path: "src/index.test.ts", command: featureCommand }],
+    });
+    await expect(fixCommand(context, { finding })).rejects.toMatchObject({ exitCode: 6 });
+    const [patches, updatedFinding] = await Promise.all([
+      readPatchAttempts(paths),
+      readFinding(paths, finding),
+    ]);
+
+    expect(patches[0]?.status).toBe("failed");
+    expect(patches[0]?.commandsRun).toHaveLength(1);
+    expect(patches[0]?.commandsRun[0]).toMatchObject({ command: featureCommand, exitCode: 7 });
+    expect(updatedFinding?.status).toBe("open");
+    delete process.env["CLAWPATCH_PROVIDER"];
+  });
+
+  it("deduplicates feature-specific and configured fix validation commands", async () => {
+    const root = await fixtureRoot("clawpatch-feature-validation-dedupe-");
+    await runCommand(
+      "git init -q && git config user.email test@example.com && git config user.name Test",
+      root,
+    );
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({
+        name: "buggy",
+        bin: { buggy: "src/index.ts" },
+        scripts: {
+          format: 'node -e "process.exit(0)"',
+          test: 'node -e "process.exit(0)"',
+        },
+      }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
+    await runCommand(
+      "git add package.json src/index.ts && git -c commit.gpgsign=false commit -q -m init",
+      root,
+    );
+    process.env["CLAWPATCH_PROVIDER"] = "mock";
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await mapCommand(context);
+    const reviewed = (await reviewCommand(context, { limit: "1" })) as { next: string };
+    const finding = reviewed.next.split(" ").at(-1) ?? "";
+    const paths = statePaths(join(root, ".clawpatch"));
+    const feature = (await readFeatures(paths))[0];
+    const featureCommand = 'node -e "process.exit(0)"';
+    await writeFeature(paths, {
+      ...feature!,
+      tests: [
+        { path: "src/index.test.ts", command: "" },
+        { path: "src/index.test.ts", command: featureCommand },
+        { path: "src/index.test.ts", command: "npm run test" },
+      ],
+    });
+    const fixed = await fixCommand(context, { finding });
+    const patches = await readPatchAttempts(paths);
+
+    expect(fixed).toMatchObject({ status: "applied", commands: 3 });
+    expect(patches[0]?.commandsRun.map((result) => result.command)).toEqual([
+      "npm run format",
+      featureCommand,
+      "npm run test",
+    ]);
+    delete process.env["CLAWPATCH_PROVIDER"];
+  });
+
   it("blocks fix when git cleanliness cannot be verified", async () => {
     const root = await fixtureRoot("clawpatch-non-git-fix-");
     await writeFixture(

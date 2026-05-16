@@ -618,7 +618,7 @@ export async function fixCommand(
   };
   const prompt = await buildFixPrompt(loaded.root, finding, feature);
   if (flags["dryRun"] === true) {
-    const validationCommands = collectValidationCommands(config.commands);
+    const validationCommands = validationCommandsForFeature(feature, config.commands);
     return {
       finding: finding.findingId,
       dryRun: true,
@@ -657,7 +657,7 @@ export async function fixCommand(
     });
     throw error;
   }
-  const validationCommands = collectValidationCommands(config.commands);
+  const validationCommands = validationCommandsForFeature(feature, config.commands);
   const commandsRun: CommandResult[] = [];
   for (const command of validationCommands) {
     commandsRun.push(await runCommand(command, loaded.root));
@@ -788,18 +788,6 @@ function applyProviderFlags(
   };
 }
 
-function collectValidationCommands(commands: {
-  typecheck: string | null;
-  lint: string | null;
-  format: string | null;
-  test: string | null;
-}): string[] {
-  const ordered = [commands.format, commands.typecheck, commands.lint, commands.test].filter(
-    (command): command is string => command !== null && command.length > 0,
-  );
-  return Array.from(new Set(ordered));
-}
-
 function validationCommandsForFeature(
   feature: FeatureRecord | null,
   commands: {
@@ -809,12 +797,17 @@ function validationCommandsForFeature(
     test: string | null;
   },
 ): string[] {
-  return Array.from(
-    new Set([
-      ...(feature?.tests ?? []).flatMap((test) => (test.command === null ? [] : [test.command])),
-      ...collectValidationCommands(commands),
-    ]),
+  const featureCommands = (feature?.tests ?? []).flatMap((test) =>
+    test.command === null || test.command.length === 0 ? [] : [test.command],
   );
+  const ordered = [
+    commands.format,
+    ...featureCommands,
+    commands.typecheck,
+    commands.lint,
+    commands.test,
+  ].filter((command): command is string => command !== null && command.length > 0);
+  return Array.from(new Set(ordered));
 }
 
 async function selectRevalidationFindings(
