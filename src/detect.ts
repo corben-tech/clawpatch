@@ -896,7 +896,7 @@ async function isRubyProject(root: string): Promise<boolean> {
     (await pathExists(join(root, "gems.rb"))) ||
     (await pathExists(join(root, "Rakefile"))) ||
     (await pathExists(join(root, "config.ru"))) ||
-    (await rubyGemspecPaths(root)).length > 0
+    (await rubyGemspecPaths(root, { includeNested: true })).length > 0
   ) {
     return true;
   }

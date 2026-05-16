@@ -49,7 +49,10 @@ export async function fileHasRubyShebang(path: string): Promise<boolean> {
   }
 }
 
-export async function rubyGemspecPaths(root: string): Promise<string[]> {
+export async function rubyGemspecPaths(
+  root: string,
+  options: { includeNested?: boolean } = {},
+): Promise<string[]> {
   const paths: string[] = [];
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
@@ -58,6 +61,7 @@ export async function rubyGemspecPaths(root: string): Promise<string[]> {
       continue;
     }
     if (
+      options.includeNested !== true ||
       !entry.isDirectory() ||
       entry.isSymbolicLink() ||
       gemspecSearchSkipEntries.has(entry.name)

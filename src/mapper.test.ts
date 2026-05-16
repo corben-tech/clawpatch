@@ -494,6 +494,31 @@ describe("mapFeatures", () => {
     expect(nodeAsset?.title).toBe("Node source app");
   });
 
+  it("does not apply nested Ruby gemspec dependencies to root Rails detection", async () => {
+    const root = await fixtureRoot("clawpatch-map-nested-ruby-gemspec-");
+    await writeFixture(root, "package.json", JSON.stringify({ name: "mixed-root" }));
+    await writeFixture(
+      root,
+      "engine/engine.gemspec",
+      "Gem::Specification.new do |spec|\n  spec.name = 'engine'\n  spec.add_dependency 'rails'\nend\n",
+    );
+    await writeFixture(root, "engine/lib/engine.rb", "module Engine\nend\n");
+    await writeFixture(root, "config/application.rb", "module NotRails\nend\n");
+    await writeFixture(root, "app/assets/admin.ts", "export const admin = true;\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+    const nodeAsset = result.features.find((feature) =>
+      feature.ownedFiles.some((file) => file.path === "app/assets/admin.ts"),
+    );
+
+    expect(project.detected.languages).toContain("ruby");
+    expect(project.detected.frameworks).not.toContain("rails");
+    expect(titles).not.toContain("Rails application configuration");
+    expect(nodeAsset?.title).toBe("Node source app");
+  });
+
   it("maps Gemfile-only Jekyll sites without mistaking dependencies for project names", async () => {
     const root = await fixtureRoot("clawpatch-map-jekyll-");
     await writeFixture(

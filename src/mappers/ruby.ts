@@ -191,12 +191,12 @@ async function rubyMetadataFiles(root: string): Promise<string[]> {
 }
 
 async function rubyGemspecs(root: string): Promise<string[]> {
-  return rubyGemspecPaths(root);
+  return rubyGemspecPaths(root, { includeNested: true });
 }
 
 async function rubyDependencySource(root: string): Promise<string> {
   const chunks: string[] = [];
-  for (const path of [...metadataFiles, ...(await rubyGemspecs(root))]) {
+  for (const path of [...metadataFiles, ...(await rubyGemspecPaths(root))]) {
     if (await pathExists(join(root, path))) {
       chunks.push(await readFile(join(root, path), "utf8"));
     }
