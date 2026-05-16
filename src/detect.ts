@@ -3,6 +3,12 @@ import { join } from "node:path";
 import { pathExists } from "./fs.js";
 import { projectNameFromRoot, discoverGit } from "./git.js";
 import { stableId } from "./id.js";
+import {
+  fileHasRubyShebang,
+  rubyDependencyNames,
+  rubyGemspecPaths,
+  stripRubyComments,
+} from "./ruby.js";
 import { ProjectRecord, ProjectCommands } from "./types.js";
 
 type PackageJson = {
@@ -350,11 +356,15 @@ function pythonRunCommand(runner: string | null, command: string): string {
 
 async function rubyDefaultCommands(root: string): Promise<ProjectCommands> {
   const source = await rubyDependencySource(root);
+  const dependencies = rubyDependencyNames(source);
   const hasBundle = await hasBundlerConfig(root);
-  const hasRspec = /\brspec\b/iu.test(source) || (await containsRubySpecFile(root, 5));
-  const hasMinitest = /\bminitest\b/iu.test(source) || (await containsRubyTestFile(root, 5));
+  const hasRspec =
+    dependencies.has("rspec") ||
+    dependencies.has("rspec-rails") ||
+    (await containsRubySpecFile(root, 5));
+  const hasMinitest = dependencies.has("minitest") || (await containsRubyTestFile(root, 5));
   const hasRubocop =
-    /\brubocop\b/iu.test(source) ||
+    hasRubocopDependency(dependencies) ||
     (await pathExists(join(root, ".rubocop.yml"))) ||
     (await pathExists(join(root, ".rubocop_todo.yml")));
   const run = hasBundle ? "bundle exec " : "";
@@ -364,6 +374,12 @@ async function rubyDefaultCommands(root: string): Promise<ProjectCommands> {
     format: null,
     test: hasRspec ? `${run}rspec` : hasMinitest ? `${run}rake test` : null,
   };
+}
+
+function hasRubocopDependency(dependencies: Set<string>): boolean {
+  return [...dependencies].some(
+    (dependency) => dependency === "rubocop" || dependency.startsWith("rubocop-"),
+  );
 }
 
 async function hasBundlerConfig(root: string): Promise<boolean> {
@@ -377,12 +393,10 @@ async function rubyDependencySource(root: string): Promise<string> {
       chunks.push(await readFile(join(root, path), "utf8"));
     }
   }
-  for (const entry of await readdir(root).catch(() => [])) {
-    if (entry.endsWith(".gemspec")) {
-      chunks.push(await readFile(join(root, entry), "utf8"));
-    }
+  for (const path of await rubyGemspecPaths(root)) {
+    chunks.push(await readFile(join(root, path), "utf8"));
   }
-  return chunks.join("\n");
+  return stripRubyComments(chunks.join("\n"));
 }
 
 async function pythonProjectInfo(root: string): Promise<PythonProjectInfo> {
@@ -882,7 +896,7 @@ async function isRubyProject(root: string): Promise<boolean> {
     (await pathExists(join(root, "gems.rb"))) ||
     (await pathExists(join(root, "Rakefile"))) ||
     (await pathExists(join(root, "config.ru"))) ||
-    (await containsFileWithExtension(root, ".gemspec", 1))
+    (await rubyGemspecPaths(root, { includeNested: true })).length > 0
   ) {
     return true;
   }
@@ -977,12 +991,68 @@ async function collectPythonFrameworkScanFiles(
 }
 
 async function containsReviewableRubyFile(root: string): Promise<boolean> {
-  for (const prefix of ["app", "lib", "scripts", "exe", "bin"]) {
-    if (await containsFileWithExtension(join(root, prefix), ".rb", 4)) {
+  if (await containsFileMatching(root, 0, isRootReviewableRubyFileName)) {
+    return true;
+  }
+  for (const prefix of ["app", "lib"]) {
+    if (await containsFileMatching(join(root, prefix), 4, isReviewableRubyFileName)) {
+      return true;
+    }
+  }
+  for (const prefix of ["scripts", "script", "exe", "bin"]) {
+    if (await containsRubyExecutableSource(join(root, prefix), 4)) {
       return true;
     }
   }
   return false;
+}
+
+function isReviewableRubyFileName(entry: string): boolean {
+  return (
+    entry.endsWith(".rb") &&
+    !entry.endsWith("_spec.rb") &&
+    !entry.endsWith("_test.rb") &&
+    !/(?:generated|\.gen)\.rb$/iu.test(entry)
+  );
+}
+
+function isRootReviewableRubyFileName(entry: string): boolean {
+  return isReviewableRubyFileName(entry) && !entry.startsWith("test_");
+}
+
+async function containsRubyExecutableSource(dir: string, remainingDepth: number): Promise<boolean> {
+  if (remainingDepth < 0 || !(await pathExists(dir))) {
+    return false;
+  }
+  const dirInfo = await lstat(dir);
+  if (!dirInfo.isDirectory() || dirInfo.isSymbolicLink()) {
+    return false;
+  }
+  for (const entry of await readdir(dir)) {
+    if (shouldSkipSearchEntry(entry)) {
+      continue;
+    }
+    const full = join(dir, entry);
+    const info = await lstat(full);
+    if (info.isSymbolicLink()) {
+      continue;
+    }
+    if (
+      info.isFile() &&
+      (isReviewableRubyFileName(entry) ||
+        (isRubyShebangCandidate(entry) && (await fileHasRubyShebang(full))))
+    ) {
+      return true;
+    }
+    if (info.isDirectory() && (await containsRubyExecutableSource(full, remainingDepth - 1))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isRubyShebangCandidate(path: string): boolean {
+  return !path.includes(".");
 }
 
 async function containsRubySpecFile(root: string, maxDepth: number): Promise<boolean> {
@@ -990,7 +1060,53 @@ async function containsRubySpecFile(root: string, maxDepth: number): Promise<boo
 }
 
 async function containsRubyTestFile(root: string, maxDepth: number): Promise<boolean> {
-  return containsFileMatching(root, maxDepth, (entry) => entry.endsWith("_test.rb"));
+  return (
+    (await containsFileMatching(root, maxDepth, (entry) => entry.endsWith("_test.rb"))) ||
+    (await containsRubyPrefixedMinitestFile(root, maxDepth))
+  );
+}
+
+function isRubyPrefixedMinitestFileName(entry: string): boolean {
+  return /^test_.+\.rb$/u.test(entry) && !/^test_helpers?\.rb$/u.test(entry);
+}
+
+async function containsRubyPrefixedMinitestFile(
+  dir: string,
+  remainingDepth: number,
+  relativeDir = "",
+): Promise<boolean> {
+  if (remainingDepth < 0 || !(await pathExists(dir))) {
+    return false;
+  }
+  const dirInfo = await lstat(dir);
+  if (!dirInfo.isDirectory() || dirInfo.isSymbolicLink()) {
+    return false;
+  }
+  for (const entry of await readdir(dir)) {
+    if (shouldSkipSearchEntry(entry)) {
+      continue;
+    }
+    const full = join(dir, entry);
+    const path = relativeDir === "" ? entry : `${relativeDir}/${entry}`;
+    const info = await lstat(full);
+    if (info.isSymbolicLink()) {
+      continue;
+    }
+    if (
+      info.isFile() &&
+      isRubyPrefixedMinitestFileName(entry) &&
+      (relativeDir === "" || /(^|\/)test$/u.test(relativeDir))
+    ) {
+      return true;
+    }
+    if (
+      info.isDirectory() &&
+      (await containsRubyPrefixedMinitestFile(full, remainingDepth - 1, path))
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function containsFileNamed(root: string, name: string, maxDepth: number): Promise<boolean> {

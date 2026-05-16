@@ -100,9 +100,9 @@ tuple, or set literals. FastAPI paths can be positional strings or literal
 pyright, and black.
 
 Ruby mapping covers project metadata, executables, source groups, RSpec and
-Minitest suites, and Rails app structure. Rails legacy `config/secrets.yml` is
-not mapped as reviewable config because it can contain provider-sensitive
-secrets.
+Minitest suites, and Rails app structure. Rails legacy `config/secrets.yml`,
+`config/database.yml`, and `config/initializers/secret_token.rb` are not mapped
+as reviewable config because they can contain provider-sensitive secrets.
 
 Known gaps:
 
