@@ -431,6 +431,22 @@ describe("mapFeatures", () => {
     expect(owned).not.toContain("test/test_helper.rb");
   });
 
+  it("detects co-located Ruby Minitest suffix tests", async () => {
+    const root = await fixtureRoot("clawpatch-map-ruby-colocated-minitest-");
+    await writeFixture(root, "Gemfile", "source 'https://rubygems.org'\n");
+    await writeFixture(root, "lib/fixture.rb", "module Fixture\nend\n");
+    await writeFixture(root, "lib/fixture_test.rb", "require 'minitest/autorun'\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const source = result.features.find((feature) => feature.title === "Ruby source lib");
+
+    expect(project.detected.commands.test).toBe("bundle exec rake test");
+    expect(source?.tests).toEqual([
+      { path: "lib/fixture_test.rb", command: "bundle exec rake test" },
+    ]);
+  });
+
   it("ignores generated nested gemspec artifacts", async () => {
     const root = await fixtureRoot("clawpatch-map-ruby-generated-gemspec-");
     await writeFixture(root, "package.json", JSON.stringify({ name: "node-only" }));
