@@ -8,6 +8,7 @@ import { runCommand } from "./exec.js";
 import { nowIso, writeJson } from "./fs.js";
 import { changedFilesSince, discoverGit, findProjectRoot } from "./git.js";
 import { stableId, runId } from "./id.js";
+import { mapWithSource } from "./agent-mapper.js";
 import { mapFeatures } from "./mapper.js";
 import { suppressedTestCommandTag } from "./mappers/types.js";
 import { providerByName } from "./provider.js";
@@ -82,8 +83,16 @@ export async function mapCommand(
   flags: Record<string, string | boolean> = {},
 ): Promise<unknown> {
   const loaded = await loadProjectState(context);
+  const source = parseMapSource(flags);
+  const config = applyProviderFlags(loaded.config, flags);
+  const provider = source === "heuristic" ? null : providerByName(config.provider.name);
   const existing = await readFeatures(loaded.paths);
-  const result = await mapFeatures(loaded.root, loaded.project, existing);
+  const heuristic = await mapFeatures(loaded.root, loaded.project, existing);
+  const result = await mapWithSource(loaded.root, loaded.project, existing, heuristic, {
+    source,
+    provider,
+    model: config.provider.model,
+  });
   const activeFeatureIds = new Set(result.features.map((feature) => feature.featureId));
   if (flags["dryRun"] === true) {
     return {
@@ -92,6 +101,9 @@ export async function mapCommand(
       new: result.created,
       changed: result.changed,
       stale: result.stale,
+      source: result.decision.source,
+      usedAgent: result.decision.usedAgent,
+      reason: result.decision.reason,
     };
   }
   for (const feature of result.features) {
@@ -112,6 +124,9 @@ export async function mapCommand(
     new: result.created,
     changed: result.changed,
     stale: result.stale,
+    source: result.decision.source,
+    usedAgent: result.decision.usedAgent,
+    reason: result.decision.reason,
     next: "clawpatch review --limit 3",
   };
 }
@@ -851,6 +866,18 @@ function applyProviderFlags(
       model: model ?? config.provider.model,
     },
   };
+}
+
+function parseMapSource(flags: Record<string, string | boolean>): "heuristic" | "auto" | "agent" {
+  const source = stringFlag(flags, "source") ?? "heuristic";
+  if (source === "heuristic" || source === "auto" || source === "agent") {
+    return source;
+  }
+  throw new ClawpatchError(
+    "invalid --source; expected heuristic, auto, or agent",
+    2,
+    "invalid-usage",
+  );
 }
 
 function validationCommandsForFeature(

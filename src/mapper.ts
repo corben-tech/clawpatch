@@ -48,6 +48,15 @@ export async function mapFeatures(
   existing: FeatureRecord[],
 ): Promise<MapResult> {
   const seeds = await collectSeeds(root);
+  return mapFeatureSeeds(root, project, existing, seeds);
+}
+
+export async function mapFeatureSeeds(
+  root: string,
+  project: ProjectRecord,
+  existing: FeatureRecord[],
+  seeds: FeatureSeed[],
+): Promise<MapResult> {
   const existingById = new Map(existing.map((feature) => [feature.featureId, feature]));
   const features: FeatureRecord[] = [];
   let created = 0;

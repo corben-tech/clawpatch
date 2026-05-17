@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { runCommandArgs } from "./exec.js";
 import { ClawpatchError } from "./errors.js";
 import {
+  AgentMapOutput,
   FixPlanOutput,
   ReviewOutput,
   RevalidateOutput,
+  agentMapOutputSchema,
   fixPlanOutputSchema,
   reviewOutputSchema,
   revalidateOutputSchema,
@@ -15,6 +17,7 @@ import {
 export type Provider = {
   name: string;
   check(root: string): Promise<string>;
+  map(root: string, prompt: string, model: string | null): Promise<AgentMapOutput>;
   review(root: string, prompt: string, model: string | null): Promise<ReviewOutput>;
   fix(root: string, prompt: string, model: string | null): Promise<FixPlanOutput>;
   revalidate(root: string, prompt: string, model: string | null): Promise<RevalidateOutput>;
@@ -51,6 +54,10 @@ const codexProvider: Provider = {
     }
     return result.stdout.trim();
   },
+  async map(root: string, prompt: string, model: string | null): Promise<AgentMapOutput> {
+    const output = await runCodexJson(root, prompt, model, agentMapJsonSchema);
+    return agentMapOutputSchema.parse(output);
+  },
   async review(root: string, prompt: string, model: string | null): Promise<ReviewOutput> {
     const output = await runCodexJson(root, prompt, model, reviewJsonSchema);
     return reviewOutputSchema.parse(output);
@@ -74,6 +81,10 @@ const opencodeProvider: Provider = {
     }
     return result.stdout.trim();
   },
+  async map(root: string, prompt: string, model: string | null): Promise<AgentMapOutput> {
+    const output = await runOpencodeJson(root, prompt, model, agentMapJsonSchema, true);
+    return agentMapOutputSchema.parse(output);
+  },
   async review(root: string, prompt: string, model: string | null): Promise<ReviewOutput> {
     const output = await runOpencodeJson(root, prompt, model, reviewJsonSchema, true);
     return reviewOutputSchema.parse(output);
@@ -89,6 +100,7 @@ const opencodeProvider: Provider = {
 };
 
 const ACPX_TESTED_VERSIONS = "^0.8.0";
+const ACPX_DEFAULT_TIMEOUT_MS = 180_000;
 
 const acpxProvider: Provider = {
   name: "acpx",
@@ -103,6 +115,10 @@ const acpxProvider: Provider = {
     }
     const version = result.stdout.trim();
     return `${version} (tested against ${ACPX_TESTED_VERSIONS})`;
+  },
+  async map(root: string, prompt: string, model: string | null): Promise<AgentMapOutput> {
+    const output = await runAcpxJson(root, prompt, model, agentMapJsonSchema, "read");
+    return agentMapOutputSchema.parse(output);
   },
   async review(root: string, prompt: string, model: string | null): Promise<ReviewOutput> {
     const output = await runAcpxJson(root, prompt, model, reviewJsonSchema, "read");
@@ -127,6 +143,10 @@ const grokProvider: Provider = {
     }
     return result.stdout.trim();
   },
+  async map(root: string, prompt: string, model: string | null): Promise<AgentMapOutput> {
+    const output = await runGrokJson(root, prompt, model, agentMapJsonSchema, true);
+    return agentMapOutputSchema.parse(output);
+  },
   async review(root: string, prompt: string, model: string | null): Promise<ReviewOutput> {
     const output = await runGrokJson(root, prompt, model, reviewJsonSchema, true);
     return reviewOutputSchema.parse(output);
@@ -145,6 +165,34 @@ const mockProvider: Provider = {
   name: "mock",
   async check(): Promise<string> {
     return "mock";
+  },
+  async map(_root: string, prompt: string): Promise<AgentMapOutput> {
+    const paths = [...prompt.matchAll(/"([^"]*agent\/[^"]+\.[^"]+)"/gu)]
+      .map((match) => match[1]?.trim())
+      .filter((path): path is string => path !== undefined && path.length > 0);
+    const owned = [...new Set(paths.filter((path) => !/test|spec/u.test(path)))].slice(0, 6);
+    const tests = paths.filter((path) => /test|spec/u.test(path)).slice(0, 3);
+    return {
+      features:
+        owned.length === 0
+          ? []
+          : [
+              {
+                title: "Agent mapped package agent",
+                summary: "Mock agent mapper grouped otherwise unmapped agent files.",
+                kind: "library",
+                confidence: "medium",
+                entrypoints: [{ path: owned[0]!, symbol: null, route: null, command: null }],
+                ownedFiles: owned.map((path) => ({ path, reason: "agent mapper owned file" })),
+                contextFiles: tests.map((path) => ({ path, reason: "agent mapper nearby test" })),
+                tests: tests.map((path) => ({ path, command: "touch SHOULD_NOT_RUN_AGENT_MAP" })),
+                tags: ["agent-mapped"],
+                trustBoundaries: [],
+                reason: "Mock provider detected the agent/ source group.",
+              },
+            ],
+      notes: ["mock agent map"],
+    };
   },
   async review(_root: string, prompt: string): Promise<ReviewOutput> {
     if (!prompt.includes("TODO_BUG") && !prompt.includes("BUG:")) {
@@ -210,6 +258,9 @@ const mockFailProvider: Provider = {
   name: "mock-fail",
   async check(): Promise<string> {
     return "mock-fail";
+  },
+  async map(): Promise<AgentMapOutput> {
+    throw new ClawpatchError("mock map failure", 1, "mock-failure");
   },
   async review(): Promise<ReviewOutput> {
     throw new ClawpatchError("mock review failure", 1, "mock-failure");
@@ -283,14 +334,21 @@ async function runOpencodeJson(
   await writeFile(promptPath, opencodePrompt(prompt, schema, readOnly), "utf8");
 
   try {
-    const args = ["run", "--format", "json", "--dir", root, "--file", promptPath];
+    const args = [
+      "run",
+      "Follow the attached clawpatch prompt. Return only the requested JSON object.",
+      "--format",
+      "json",
+      "--dir",
+      root,
+      `--file=${promptPath}`,
+    ];
     if (model !== null) {
       args.push("--model", model);
     }
     if (!readOnly) {
       args.push("--dangerously-skip-permissions");
     }
-    args.push("Follow the attached clawpatch prompt. Return only the requested JSON object.");
     const result = await runCommandArgs(
       "opencode",
       args,
@@ -361,7 +419,11 @@ export function extractOpencodeJson(stdout: string): unknown {
             : typeof event.error?.name === "string"
               ? event.error.name
               : "unknown";
-      throw new ClawpatchError(`opencode provider error: ${message}`, 1, "provider-failure");
+      throw new ClawpatchError(
+        `opencode provider error: ${message}`,
+        providerExitCode(message),
+        "provider-failure",
+      );
     }
   }
   const combined = textParts.join("").trim();
@@ -423,7 +485,7 @@ async function runAcpxJson(
     args,
     root,
     buildAcpxPrompt(prompt, schema, permission),
-    { trimOutput: false },
+    { trimOutput: false, timeoutMs: acpxTimeoutMs() },
   );
   if (result.exitCode !== 0) {
     throw new ClawpatchError(
@@ -700,7 +762,7 @@ function parseCodexJson(raw: string): unknown {
 }
 
 function providerExitCode(stderr: string): number {
-  if (/auth|login|api key/iu.test(stderr)) {
+  if (/auth|login|api key|unauthorized|wrong api key/iu.test(stderr)) {
     return 4;
   }
   if (/quota|rate.?limit/iu.test(stderr)) {
@@ -781,10 +843,20 @@ function acpxExitCode(stdout: string, stderr: string, exitCode: number | null): 
   if (/acpx: command not found|spawn acpx ENOENT/iu.test(combined)) {
     return 4;
   }
-  if (exitCode === 3 || /TIMEOUT/iu.test(combined)) {
+  if (exitCode === 3 || exitCode === 124 || /TIMEOUT|timed out/iu.test(combined)) {
     return 1;
   }
   return 1;
+}
+
+function acpxTimeoutMs(): number {
+  const raw =
+    process.env["CLAWPATCH_ACPX_TIMEOUT_MS"] ?? process.env["CLAWPATCH_PROVIDER_TIMEOUT_MS"];
+  if (raw === undefined) {
+    return ACPX_DEFAULT_TIMEOUT_MS;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : ACPX_DEFAULT_TIMEOUT_MS;
 }
 
 // eslint-disable-next-line no-underscore-dangle
@@ -794,6 +866,111 @@ export const __testing = {
   extractOpencodeJson,
   parseAcpxAgent,
   parseCodexJson,
+};
+
+const agentMapJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["features", "notes"],
+  properties: {
+    features: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "title",
+          "summary",
+          "kind",
+          "confidence",
+          "entrypoints",
+          "ownedFiles",
+          "contextFiles",
+          "tests",
+          "tags",
+          "trustBoundaries",
+          "reason",
+        ],
+        properties: {
+          title: { type: "string" },
+          summary: { type: "string" },
+          kind: {
+            enum: [
+              "cli-command",
+              "route",
+              "ui-flow",
+              "service",
+              "job",
+              "agent-tool",
+              "library",
+              "config",
+              "release",
+              "test-suite",
+              "infra",
+              "unknown",
+            ],
+          },
+          confidence: { enum: ["high", "medium", "low"] },
+          entrypoints: { type: "array", items: { $ref: "#/$defs/entrypoint" } },
+          ownedFiles: { type: "array", items: { $ref: "#/$defs/fileRef" } },
+          contextFiles: { type: "array", items: { $ref: "#/$defs/fileRef" } },
+          tests: { type: "array", items: { $ref: "#/$defs/testRef" } },
+          tags: { type: "array", items: { type: "string" } },
+          trustBoundaries: {
+            type: "array",
+            items: {
+              enum: [
+                "user-input",
+                "network",
+                "filesystem",
+                "secrets",
+                "process-exec",
+                "database",
+                "auth",
+                "permissions",
+                "concurrency",
+                "external-api",
+                "serialization",
+              ],
+            },
+          },
+          reason: { type: "string" },
+        },
+      },
+    },
+    notes: { type: "array", items: { type: "string" } },
+  },
+  $defs: {
+    fileRef: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "reason"],
+      properties: {
+        path: { type: "string" },
+        reason: { type: "string" },
+      },
+    },
+    testRef: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "command"],
+      properties: {
+        path: { type: "string" },
+        command: { anyOf: [{ type: "string" }, { type: "null" }] },
+      },
+    },
+    entrypoint: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "symbol", "route", "command"],
+      properties: {
+        path: { type: "string" },
+        symbol: { anyOf: [{ type: "string" }, { type: "null" }] },
+        route: { anyOf: [{ type: "string" }, { type: "null" }] },
+        command: { anyOf: [{ type: "string" }, { type: "null" }] },
+      },
+    },
+  },
 };
 
 const reviewJsonSchema = {

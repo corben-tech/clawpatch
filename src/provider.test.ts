@@ -309,6 +309,22 @@ describe("extractOpencodeJson", () => {
 
     expect(() => extractOpencodeJson(stdout)).toThrow(/auth required/u);
   });
+
+  it("classifies opencode unauthorized errors as provider auth failures", () => {
+    const stdout = JSON.stringify({
+      type: "error",
+      error: { data: { message: "Unauthorized: Wrong API Key" } },
+    });
+
+    try {
+      extractOpencodeJson(stdout);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ClawpatchError);
+      expect((err as ClawpatchError).exitCode).toBe(4);
+      return;
+    }
+    throw new Error("expected provider auth failure");
+  });
 });
 
 describe("providerByName", () => {

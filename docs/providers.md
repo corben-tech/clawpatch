@@ -70,6 +70,7 @@ ACP-compatible coding agent.
 - fix: `--approve-all`
 - output: `--format json --json-strict --suppress-reads`, parsed from known ACP NDJSON envelope kinds
 - tested envelope shape: `acpx@^0.8.0`
+- timeout: 180 seconds by default, override with `CLAWPATCH_ACPX_TIMEOUT_MS` or `CLAWPATCH_PROVIDER_TIMEOUT_MS`
 
 Permission caveat: `acpx --approve-all` is not the same as `codex --sandbox
 workspace-write`. Codex's workspace-write mode is an enforced sandbox. ACPX

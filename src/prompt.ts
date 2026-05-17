@@ -2,6 +2,56 @@ import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { ClawpatchConfig, FeatureRecord, FindingRecord, ProjectRecord } from "./types.js";
 
+export function buildAgentMapPrompt(project: ProjectRecord, inventory: unknown): string {
+  return `You are mapping a repository into semantic clawpatch review slices.
+
+Return strict JSON only. No markdown fences.
+
+Goal:
+- split the repository into coherent packages/features that should be reviewed together
+- prefer many bounded review units over one giant bucket
+- use tests and context files to explain intent
+- do not invent paths; use only paths from the inventory
+- do not own generated, vendored, lock, build, or dependency-cache files
+
+Good review slices include:
+- packages, apps, CLI commands, services, routes, jobs, UI flows
+- native app targets, test suites, infra/config, shared libraries
+
+For each feature:
+- ownedFiles are the primary files to review
+- contextFiles are tests, docs, schemas, config, generated interfaces, or nearby dependencies
+- tests are executable or likely test files for this slice
+- reason explains why this group belongs together
+- confidence reflects how certain the grouping is
+
+Project:
+${JSON.stringify({ name: project.name, detected: project.detected }, null, 2)}
+
+Repository inventory:
+${JSON.stringify(inventory, null, 2)}
+
+JSON shape:
+{
+  "features": [
+    {
+      "title": "string",
+      "summary": "string",
+      "kind": "cli-command|route|ui-flow|service|job|agent-tool|library|config|release|test-suite|infra|unknown",
+      "confidence": "high|medium|low",
+      "entrypoints": [{"path":"string","symbol":null,"route":null,"command":null}],
+      "ownedFiles": [{"path":"string","reason":"string"}],
+      "contextFiles": [{"path":"string","reason":"string"}],
+      "tests": [{"path":"string","command":null}],
+      "tags": ["string"],
+      "trustBoundaries": ["user-input|network|filesystem|secrets|process-exec|database|auth|permissions|concurrency|external-api|serialization"],
+      "reason": "string"
+    }
+  ],
+  "notes": ["string"]
+}`;
+}
+
 export async function buildReviewPrompt(
   root: string,
   project: ProjectRecord,
