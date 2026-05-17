@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { access, mkdir, open, readFile, readdir, rm, symlink, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  access,
+  chmod,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  unlink,
+} from "node:fs/promises";
+import { delimiter, join } from "node:path";
 import {
   fixCommand,
   cleanLocksCommand,
@@ -296,6 +306,88 @@ describe("workflow", () => {
     });
     delete process.env["CLAWPATCH_PROVIDER"];
   });
+
+  it.runIf(process.platform !== "win32")(
+    "reviews end-to-end when codex writes fenced JSON with trailing prose",
+    async () => {
+      const root = await fixtureRoot("clawpatch-codex-fenced-e2e-");
+      await writeFixture(
+        root,
+        "package.json",
+        JSON.stringify({
+          name: "codex-fenced",
+          bin: { app: "src/index.ts" },
+          scripts: { test: "vitest run" },
+        }),
+      );
+      await writeFixture(root, "src/index.ts", "export const value = 'ok';\n");
+      const binDir = join(root, "bin");
+      const codexShim = join(binDir, "codex");
+      await writeFixture(
+        root,
+        "bin/codex",
+        [
+          "#!/usr/bin/env node",
+          'const { writeFileSync } = require("node:fs");',
+          "const args = process.argv.slice(2);",
+          'if (args.includes("--version")) { console.log("codex fake 0.130.0"); process.exit(0); }',
+          'const outputIndex = args.indexOf("--output-last-message");',
+          "if (outputIndex === -1 || outputIndex + 1 >= args.length) {",
+          '  console.error("missing --output-last-message");',
+          "  process.exit(2);",
+          "}",
+          "const payload = {",
+          "  findings: [],",
+          '  inspected: { files: ["src/index.ts"], symbols: [], notes: ["fake codex"] },',
+          "};",
+          "writeFileSync(",
+          "  args[outputIndex + 1],",
+          '  ["```json", JSON.stringify(payload), "```", "Now I have a complete picture."].join("\\n"),',
+          ");",
+          "",
+        ].join("\n"),
+      );
+      await chmod(codexShim, 0o755);
+      const previousProvider = process.env["CLAWPATCH_PROVIDER"];
+      const previousPath = process.env["PATH"];
+      process.env["CLAWPATCH_PROVIDER"] = "codex";
+      process.env["PATH"] = `${binDir}${delimiter}${previousPath ?? ""}`;
+      try {
+        const context = await makeContext(testOptions(root));
+
+        await initCommand(context, {});
+        await mapCommand(context);
+        const reviewed = await reviewCommand(context, { limit: "1" });
+        const paths = statePaths(join(root, ".clawpatch"));
+        const [features, findings, runs] = await Promise.all([
+          readFeatures(paths),
+          readFindings(paths),
+          readRuns(paths),
+        ]);
+
+        expect(reviewed).toMatchObject({ reviewed: 1, findings: 0 });
+        expect(findings).toHaveLength(0);
+        expect(runs.at(-1)).toMatchObject({ status: "completed", errors: [] });
+        expect(features.some((feature) => feature.status === "reviewed")).toBe(true);
+        expect(
+          features.some((feature) =>
+            feature.analysisHistory.some((entry) => entry.provider === "codex"),
+          ),
+        ).toBe(true);
+      } finally {
+        if (previousProvider === undefined) {
+          delete process.env["CLAWPATCH_PROVIDER"];
+        } else {
+          process.env["CLAWPATCH_PROVIDER"] = previousProvider;
+        }
+        if (previousPath === undefined) {
+          delete process.env["PATH"];
+        } else {
+          process.env["PATH"] = previousPath;
+        }
+      }
+    },
+  );
 
   it("selects review features whose owned files overlap the diff range", async () => {
     const root = await sinceFixture("clawpatch-since-owned-");
