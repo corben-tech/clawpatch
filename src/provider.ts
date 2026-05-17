@@ -361,6 +361,9 @@ const mockProvider: Provider = {
     if (!prompt.includes("TODO_BUG") && !prompt.includes("BUG:")) {
       return { findings: [], inspected: { files: [], symbols: [], notes: ["mock clean"] } };
     }
+    const evidencePath = prompt.includes("BAD_EVIDENCE")
+      ? "src/not-included.ts"
+      : (firstPromptFileWith(prompt, "TODO_BUG") ?? "src/index.ts");
     return {
       findings: [
         {
@@ -370,7 +373,7 @@ const mockProvider: Provider = {
           confidence: "high",
           evidence: [
             {
-              path: "src/index.ts",
+              path: evidencePath,
               startLine: null,
               endLine: null,
               symbol: null,
@@ -386,7 +389,7 @@ const mockProvider: Provider = {
           minimumFixScope: "Replace the marker in the owning feature file.",
         },
       ],
-      inspected: { files: ["src/index.ts"], symbols: [], notes: ["mock finding"] },
+      inspected: { files: [evidencePath], symbols: [], notes: ["mock finding"] },
     };
   },
   async fix(): Promise<FixPlanOutput> {
@@ -416,6 +419,22 @@ const mockProvider: Provider = {
     return { outcome: "uncertain", reasoning: "mock provider cannot inspect fixes", commands: [] };
   },
 };
+
+function firstPromptFileWith(prompt: string, marker: string): string | null {
+  const blocks = prompt.split(/^--- /gmu).slice(1);
+  for (const block of blocks) {
+    const newline = block.indexOf("\n");
+    if (newline === -1) {
+      continue;
+    }
+    const path = block.slice(0, newline).trim();
+    const contents = block.slice(newline + 1);
+    if (path.length > 0 && contents.includes(marker)) {
+      return path;
+    }
+  }
+  return null;
+}
 
 const mockFailProvider: Provider = {
   name: "mock-fail",

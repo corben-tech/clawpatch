@@ -25,6 +25,8 @@ Current behavior:
 - builds bounded prompt context from owned files, context files, and tests
 - calls the configured provider
 - requires strict JSON output
+- rejects findings whose evidence cites files outside the prompt context, stale
+  line ranges, or quotes that do not match current file contents
 - writes findings under `.clawpatch/findings/`
 - appends analysis history to the feature record
 - releases the feature lock

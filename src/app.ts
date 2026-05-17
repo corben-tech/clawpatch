@@ -32,6 +32,7 @@ import {
   renderFindingDetail,
   renderReport,
 } from "./reporting.js";
+import { validateReviewOutput } from "./review-validation.js";
 import {
   filterFeaturesByChangedFiles,
   filterFeaturesByProject,
@@ -641,7 +642,12 @@ async function reviewFeature(options: ReviewFeatureOptions): Promise<{ findingId
       mode,
       customPrompt,
     );
-    const output = await provider.review(loaded.root, prompt, providerOptions(config));
+    const output = await validateReviewOutput(
+      loaded.root,
+      lockedFeature,
+      config,
+      await provider.review(loaded.root, prompt, providerOptions(config)),
+    );
     const modeFindings = reviewFindingsForMode(output.findings, mode);
     const records = modeFindings
       .slice(0, config.review.maxFindingsPerFeature)
