@@ -3,7 +3,13 @@ import { ClawpatchError } from "./errors.js";
 import { __testing, extractJson, providerByName } from "./provider.js";
 
 // eslint-disable-next-line no-underscore-dangle
-const { acpxFailureMessage, extractAcpxJson, extractOpencodeJson, parseAcpxAgent } = __testing;
+const {
+  acpxFailureMessage,
+  extractAcpxJson,
+  extractOpencodeJson,
+  parseAcpxAgent,
+  parseCodexJson,
+} = __testing;
 
 function updateEnvelope(update: object): string {
   return JSON.stringify({
@@ -71,6 +77,26 @@ describe("extractJson", () => {
   it("returns null for text with no valid JSON", () => {
     expect(extractJson("no json here at all")).toBeNull();
     expect(extractJson("just some words { unbalanced")).toBeNull();
+  });
+});
+
+describe("parseCodexJson", () => {
+  it("accepts codex output-last-message JSON wrapped in markdown with trailing prose", () => {
+    const input = [
+      "```json",
+      '{"findings":[],"inspected":{"files":[],"symbols":[],"notes":[]}}',
+      "```",
+      "Now I have a complete picture.",
+    ].join("\n");
+
+    expect(parseCodexJson(input)).toEqual({
+      findings: [],
+      inspected: { files: [], symbols: [], notes: [] },
+    });
+  });
+
+  it("throws malformed-output when codex output contains no JSON object", () => {
+    expectMalformed(() => parseCodexJson("not json"), /codex provider produced unparseable JSON/u);
   });
 });
 

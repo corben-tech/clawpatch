@@ -23,6 +23,7 @@
 - Added Next.js route mapping for `src/app` and `src/pages` layouts, thanks @obatried.
 - Added first-pass Python mapping for project metadata, console scripts, source groups, pytest suites, and conservative validation defaults, thanks @xiamx.
 - Added progress output for `clawpatch revalidate`, thanks @twidtwid.
+- Fixed Codex provider parsing for Markdown-wrapped JSON output with trailing prose, thanks @pranaysuyash.
 - Fixed overlapping `clawpatch review` runs so feature claims use atomic lock files and can be recovered with `clean-locks`, thanks @rohitjavvadi.
 - Added React Router and React component mapping, thanks @moritzscheele.
 - Improved Node/TypeScript mapping for large workspaces by splitting package source trees into bounded review groups with package-local tests.

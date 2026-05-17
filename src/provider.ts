@@ -260,7 +260,7 @@ async function runCodexJson(
   if (raw.trim().length === 0) {
     throw new ClawpatchError("codex provider produced no JSON output", 8, "malformed-output");
   }
-  return JSON.parse(raw) as unknown;
+  return parseCodexJson(raw);
 }
 
 const OPENCODE_READ_ONLY_PERMISSION = JSON.stringify({
@@ -686,6 +686,19 @@ export function extractJson(text: string): unknown | null {
   return null;
 }
 
+function parseCodexJson(raw: string): unknown {
+  const parsed = extractJson(raw.trim());
+  if (parsed !== null) {
+    return parsed;
+  }
+  const preview = safeProviderPreview(raw);
+  throw new ClawpatchError(
+    `codex provider produced unparseable JSON output (preview: ${preview})`,
+    8,
+    "malformed-output",
+  );
+}
+
 function providerExitCode(stderr: string): number {
   if (/auth|login|api key/iu.test(stderr)) {
     return 4;
@@ -780,6 +793,7 @@ export const __testing = {
   extractAcpxJson,
   extractOpencodeJson,
   parseAcpxAgent,
+  parseCodexJson,
 };
 
 const reviewJsonSchema = {
