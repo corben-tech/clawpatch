@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.2.1 - Unreleased
+
 ## 0.2.0 - 2026-05-17
 
 - Added the `acpx` provider for routing review, fix, and revalidate through ACP-compatible coding agents, thanks @mvanhorn.
