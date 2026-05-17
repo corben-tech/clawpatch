@@ -1246,7 +1246,7 @@ function parseJavaDeclarations(source: string): JavaDeclaration[] {
 function parseKotlinDeclarations(source: string): KotlinDeclaration[] {
   const declarations: KotlinDeclaration[] = [];
   const declarationPattern =
-    /\b(?:(?:data|sealed|open|abstract|final|inner|value|annotation)\s+)*(?:(enum)\s+)?(?:(fun)\s+)?(class|interface|object)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^{};]*>)?(?:(?:\s+(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^(){}]*\))?\s*)*(?:(?:public|private|protected|internal)\s+)?constructor\s*\((?:[^(){}]|\([^(){}]*\))*\))|(?:\s*\((?:[^(){}]|\([^(){}]*\))*\)))?(?:\s*:\s*([^{}]+?)(?=\s*(?:\{|\n\s*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^(){}]*\))?\s*)*(?:(?:data|sealed|open|abstract|final|inner|value|annotation)\s+)*(?:enum\s+)?(?:fun\s+)?(?:class|interface|object)\s+|$)))?/gsu;
+    /\b(?:(?:data|sealed|open|abstract|final|inner|value|annotation)\s+)*(?:(enum)\s+)?(?:(fun)\s+)?(class|interface|object)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*<[^{};]*>)?(?:(?:\s+(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^(){}]*\))?\s*)*(?:(?:public|private|protected|internal)\s+)?constructor\s*\((?:[^(){}]|\([^(){}]*\))*\))|(?:\s*\((?:[^(){}]|\([^(){}]*\))*\)))?(?:\s*:\s*([^{}]+?)(?=\s*(?:\{|\n\s*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^(){}]*\))?\s*)*(?:(?:public|private|protected|internal|const|lateinit)\s+)*(?:(?:(?:data|sealed|open|abstract|final|inner|value|annotation)\s+)*(?:enum\s+)?(?:fun\s+)?(?:class|interface|object)|fun|val|var)\s+|$)))?/gsu;
   for (const match of source.matchAll(declarationPattern)) {
     const rawKind = match[3];
     const name = match[4];

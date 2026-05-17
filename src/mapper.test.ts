@@ -4122,6 +4122,40 @@ describe("mapFeatures", () => {
     );
   });
 
+  it("maps bodyless Kotlin supertypes before top-level functions", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-bodyless-supertype-");
+    await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(root, "build.gradle.kts", 'plugins { id("org.jetbrains.kotlin.jvm") }\n');
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/jobs/JobFactory.kt",
+      [
+        "package com.example.jobs",
+        "",
+        "import org.scheduler.JobFactoryBase",
+        "",
+        "class JobFactory : JobFactoryBase()",
+        "",
+        "fun helper() = Unit",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const component = result.features.find(
+      (feature) =>
+        feature.source === "kotlin-server-role-framework-component" &&
+        feature.ownedFiles.some(
+          (file) => file.path === "src/main/kotlin/com/example/jobs/JobFactory.kt",
+        ),
+    );
+
+    expect(component?.ownedFiles[0]?.reason).toContain(
+      "inherits external type org.scheduler.JobFactoryBase",
+    );
+  });
+
   it("maps Kotlin return types after function-typed parameters", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-function-param-return-type-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
