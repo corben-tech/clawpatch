@@ -2695,6 +2695,39 @@ describe("mapFeatures", () => {
     );
   });
 
+  it("ignores Kotlin role markers inside nested block comments", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-nested-comment-");
+    await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(root, "build.gradle.kts", 'plugins { id("org.jetbrains.kotlin.jvm") }\n');
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/Foo.kt",
+      [
+        "package com.example",
+        "",
+        "/* outer",
+        "  /* inner */",
+        "  import okhttp3.OkHttpClient",
+        "  import org.springframework.web.bind.annotation.RestController",
+        "  @RestController",
+        "*/",
+        "class Foo",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+
+    expect(
+      result.features.some(
+        (feature) =>
+          feature.source === "kotlin-server-role-external-client" ||
+          feature.source === "kotlin-server-role-web-entrypoint",
+      ),
+    ).toBe(false);
+  });
+
   it("keeps Kotlin feature IDs stable when confidence changes", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-role-id-stability-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");

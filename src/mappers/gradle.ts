@@ -1551,7 +1551,32 @@ function stripJavaComments(source: string): string {
 }
 
 function stripKotlinComments(source: string): string {
-  return stripJavaComments(source);
+  let stripped = "";
+  let index = 0;
+  let depth = 0;
+  while (index < source.length) {
+    const pair = source.slice(index, index + 2);
+    if (pair === "/*") {
+      depth += 1;
+      stripped += "  ";
+      index += 2;
+      continue;
+    }
+    if (depth > 0) {
+      if (pair === "*/") {
+        depth = Math.max(0, depth - 1);
+        stripped += "  ";
+        index += 2;
+      } else {
+        stripped += " ";
+        index += 1;
+      }
+      continue;
+    }
+    stripped += source[index];
+    index += 1;
+  }
+  return stripped.replace(/\/\/.*$/gmu, "");
 }
 
 function dedupeEvidence(evidence: JvmRoleEvidence[]): JvmRoleEvidence[] {
