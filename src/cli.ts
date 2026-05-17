@@ -146,7 +146,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 const commandFlags = {
   init: new Set(["force"]),
-  map: new Set(["dryRun"]),
+  map: new Set(["dryRun", "source", "provider", "model"]),
   status: new Set<string>(),
   review: new Set(["feature", "project", "limit", "since", "jobs", "provider", "model", "dryRun"]),
   report: new Set(["status", "severity", "feature", "project", "category", "triage", "output"]),
@@ -186,6 +186,7 @@ const valueFlagNames = new Set([
   "limit",
   "since",
   "jobs",
+  "source",
   "provider",
   "model",
   "output",
@@ -456,6 +457,9 @@ Usage:
   clawpatch map [flags]
 
 Flags:
+  --source <heuristic|auto|agent>
+  --provider <name>
+  --model <name>
   --dry-run
   --json
 `);

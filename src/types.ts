@@ -319,6 +319,27 @@ export const runRecordSchema = z.object({
 
 export type RunRecord = z.infer<typeof runRecordSchema>;
 
+export const agentMapOutputSchema = z.object({
+  features: z.array(
+    z.object({
+      title: z.string(),
+      summary: z.string(),
+      kind: z.enum(featureKinds),
+      confidence: z.enum(["high", "medium", "low"]),
+      entrypoints: z.array(featureEntrypointSchema),
+      ownedFiles: z.array(featureFileRefSchema),
+      contextFiles: z.array(featureFileRefSchema),
+      tests: z.array(featureTestRefSchema),
+      tags: z.array(z.string()),
+      trustBoundaries: z.array(z.enum(trustBoundaries)),
+      reason: z.string(),
+    }),
+  ),
+  notes: z.array(z.string()),
+});
+
+export type AgentMapOutput = z.infer<typeof agentMapOutputSchema>;
+
 export const reviewOutputSchema = z.object({
   findings: z.array(
     z.object({

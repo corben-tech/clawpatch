@@ -10,6 +10,8 @@ description: "How clawpatch maps repositories into reviewable feature slices"
 ```bash
 clawpatch map
 clawpatch map --dry-run
+clawpatch map --source auto
+clawpatch map --source agent --provider codex
 ```
 
 A feature is a reviewable slice with:
@@ -55,8 +57,20 @@ Supported deterministic mappers today:
   migrations, seeders, Composer scripts, and grouped PHP test suites
 - common config files
 
-The mapper does not call a model. It uses repo conventions and cheap filesystem
-walks, skips symlinked directories, and excludes common generated folders.
+The default mapper does not call a model. It uses repo conventions and cheap
+filesystem walks, skips symlinked directories, and excludes common generated
+folders.
+
+When deterministic mapping is too shallow, `clawpatch map --source auto` can ask
+the configured provider to split the repository into reviewable feature slices.
+`--source auto` runs the deterministic mapper first and invokes the agent mapper
+only when the result is weak, such as no features, only config features, very low
+source coverage, or one/two features for a larger source tree. `--source agent`
+forces the provider-backed mapper. The agent mapper is read-only, receives a
+bounded repository inventory rather than the whole repo, and Clawpatch validates
+that every returned path exists inside the repository before writing features.
+Agent-derived features use `source: agent-mapper` and include the mapper reason in
+the feature summary.
 
 For large Node/TypeScript repositories, source groups are recursively split by
 directory and then chunked so one feature owns at most a small bounded set of
@@ -129,4 +143,4 @@ Known gaps:
 - Laravel route parsing is convention-based, does not execute Laravel route discovery,
   and may omit prefixes applied by `Route::group(...)` wrappers
 - no import graph expansion beyond nearby tests yet
-- no agent enrichment yet
+- agent mapping depends on provider quality and validates paths but not semantic intent

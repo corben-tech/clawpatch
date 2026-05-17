@@ -124,6 +124,7 @@ Useful flags:
 - `--plain`
 - `--limit <n>`
 - `--jobs <n>`
+- `--source <heuristic|auto|agent>`
 - `--feature <id>`
 - `--project <name-or-root>`
 - `--finding <id>`

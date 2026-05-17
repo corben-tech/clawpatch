@@ -29,6 +29,8 @@ import { main as cliMain, packageVersion, parseArgs } from "./cli.js";
 import { loadConfig } from "./config.js";
 import { runCommand } from "./exec.js";
 import { changedFilesSince } from "./git.js";
+import { mapWithSource } from "./agent-mapper.js";
+import { mapFeatures } from "./mapper.js";
 import {
   claimFeature,
   releaseFeatureLock,
@@ -43,6 +45,7 @@ import {
   writeFinding,
 } from "./state.js";
 import { buildReviewPrompt } from "./prompt.js";
+import type { Provider } from "./provider.js";
 import { fixtureRoot, testOptions, writeFixture } from "./test-helpers.js";
 import { findingRecordSchema } from "./types.js";
 import type { FeatureRecord } from "./types.js";
@@ -70,6 +73,43 @@ async function sinceFixture(prefix: string): Promise<string> {
   await commitAll(root, "base");
   await checkCommand(root, "git tag --no-sign base");
   return root;
+}
+
+function agentMapProvider(title: () => string): Provider {
+  const feature = () => ({
+    title: title(),
+    summary: "Provider grouped custom agent files.",
+    kind: "library" as const,
+    confidence: "medium" as const,
+    entrypoints: [{ path: "agent/worker.custom", symbol: null, route: null, command: null }],
+    ownedFiles: [
+      { path: "agent/worker.custom", reason: "worker" },
+      { path: "agent/scheduler.custom", reason: "scheduler" },
+    ],
+    contextFiles: [],
+    tests: [],
+    tags: ["agent"],
+    trustBoundaries: [],
+    reason: "custom provider fixture",
+  });
+  return {
+    name: "test-agent-map",
+    async check() {
+      return "test-agent-map";
+    },
+    async map() {
+      return { features: [feature(), feature()], notes: [] };
+    },
+    async review() {
+      throw new Error("unused");
+    },
+    async fix() {
+      throw new Error("unused");
+    },
+    async revalidate() {
+      throw new Error("unused");
+    },
+  };
 }
 
 async function initGit(root: string): Promise<void> {
@@ -180,6 +220,10 @@ describe("workflow", () => {
       "unsupported flag for clean-locks: --dry-run",
     );
     expect(parseArgs(["map", "--dry-run"]).flags).toMatchObject({ dryRun: true });
+    expect(parseArgs(["map", "--source", "auto", "--provider", "mock"]).flags).toMatchObject({
+      source: "auto",
+      provider: "mock",
+    });
     expect(parseArgs(["review", "--dry-run"]).flags).toMatchObject({ dryRun: true });
     expect(parseArgs(["fix", "--finding", "f", "--dry-run"]).flags).toMatchObject({
       dryRun: true,
@@ -1009,6 +1053,93 @@ describe("workflow", () => {
 
     expect(preview).toMatchObject({ dryRun: true, stale: 1 });
     expect(features.some((feature) => feature.status === "skipped")).toBe(false);
+  });
+
+  it("can use the configured provider as an agent mapper source", async () => {
+    const root = await fixtureRoot("clawpatch-agent-map-");
+    await writeFixture(root, "agent/worker.custom", "worker source\n");
+    await writeFixture(root, "agent/scheduler.custom", "scheduler source\n");
+    await writeFixture(root, "agent/worker.test.custom", "worker test\n");
+    await writeFixture(root, "dist/agent/generated.custom", "generated source\n");
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    const mapped = await mapCommand(context, { source: "auto", provider: "mock" });
+    const features = await readFeatures(statePaths(join(root, ".clawpatch")));
+    const agentFeature = features.find((feature) => feature.source === "agent-mapper");
+
+    expect(mapped).toMatchObject({
+      source: "auto",
+      usedAgent: true,
+      reason: "heuristic mapper produced no features",
+    });
+    expect(agentFeature?.ownedFiles.map((file) => file.path).toSorted()).toEqual([
+      "agent/scheduler.custom",
+      "agent/worker.custom",
+    ]);
+    expect(agentFeature?.ownedFiles.map((file) => file.path)).not.toContain(
+      "dist/agent/generated.custom",
+    );
+    expect(agentFeature?.tests).toEqual([{ path: "agent/worker.test.custom", command: null }]);
+  });
+
+  it("fails forced agent mapping when the provider returns no valid features", async () => {
+    const root = await fixtureRoot("clawpatch-empty-agent-map-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "fallback-cli", bin: { fallback: "src/index.ts" } }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 1;\n");
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await expect(mapCommand(context, { source: "agent", provider: "mock" })).rejects.toThrow(
+      "agent mapper returned no valid features",
+    );
+  });
+
+  it("keeps agent feature ids stable across title changes and drops duplicates", async () => {
+    const root = await fixtureRoot("clawpatch-agent-map-stable-");
+    await writeFixture(root, "agent/worker.custom", "worker source\n");
+    await writeFixture(root, "agent/scheduler.custom", "scheduler source\n");
+    const context = await makeContext(testOptions(root));
+    await initCommand(context, {});
+    const paths = statePaths(join(root, ".clawpatch"));
+    const project = await readProject(paths);
+    if (project === null) {
+      throw new Error("missing project");
+    }
+    const heuristic = await mapFeatures(root, project, []);
+    let title = "Agent worker group";
+    const provider = agentMapProvider(() => title);
+
+    const first = await mapWithSource(root, project, [], heuristic, {
+      source: "agent",
+      provider,
+      model: null,
+    });
+    title = "Background worker package";
+    const second = await mapWithSource(root, project, first.features, heuristic, {
+      source: "agent",
+      provider,
+      model: null,
+    });
+
+    expect(first.features).toHaveLength(1);
+    expect(second.features).toHaveLength(1);
+    expect(second.features[0]?.featureId).toBe(first.features[0]?.featureId);
+    expect(second.stale).toBe(0);
+  });
+
+  it("rejects invalid map source values", async () => {
+    const root = await fixtureRoot("clawpatch-agent-map-bad-source-");
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await expect(mapCommand(context, { source: "magic", provider: "mock" })).rejects.toThrow(
+      "invalid --source",
+    );
   });
 
   it("does not recurse through symlinked mapper directories", async () => {
