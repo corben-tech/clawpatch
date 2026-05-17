@@ -4292,6 +4292,45 @@ describe("mapFeatures", () => {
     expect(viewModel?.source).toBe("kotlin-android-role-view-model");
   });
 
+  it("keeps final Android plugin declarations before later unrelated apply false text", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-android-trailing-apply-false-");
+    await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(
+      root,
+      "build.gradle.kts",
+      [
+        "plugins {",
+        '  id("com.android.application") version "8.0"',
+        "}",
+        "",
+        'tasks.register("note") {',
+        '  doLast { println("call .apply(false) elsewhere") }',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/ui/MainViewModel.kt",
+      [
+        "package com.example.ui",
+        "",
+        "import androidx.lifecycle.ViewModel",
+        "",
+        "class MainViewModel : ViewModel()",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const viewModel = result.features.find((feature) =>
+      feature.title.startsWith("Kotlin Android role view model "),
+    );
+
+    expect(viewModel?.source).toBe("kotlin-android-role-view-model");
+  });
+
   it("detects Android Kotlin roles from version-catalog plugin aliases without a manifest", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-android-plugin-alias-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");

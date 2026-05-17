@@ -2015,19 +2015,10 @@ function androidPluginDeclarationPattern(): RegExp {
 }
 
 function gradlePluginInvocationEnd(source: string, start: number): number {
-  const candidates = [
-    source.indexOf(";", start),
-    source.indexOf("\n    id", start + 1),
-    source.indexOf("\n  id", start + 1),
-    source.indexOf("\nid", start + 1),
-    source.indexOf("\n    alias", start + 1),
-    source.indexOf("\n  alias", start + 1),
-    source.indexOf("\nalias", start + 1),
-    source.indexOf("\n    kotlin", start + 1),
-    source.indexOf("\n  kotlin", start + 1),
-    source.indexOf("\nkotlin", start + 1),
-  ].filter((index) => index !== -1);
-  return candidates.length === 0 ? source.length : Math.min(...candidates);
+  const next = /[;}]|\n\s*(?:id\s*(?:\(|["'])|alias\s*\(|kotlin\s*\()/u.exec(
+    source.slice(start + 1),
+  );
+  return next === null ? source.length : start + 1 + next.index;
 }
 
 function normalizeVersionCatalogAlias(alias: string): string {
