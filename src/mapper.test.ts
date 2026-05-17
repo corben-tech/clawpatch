@@ -555,6 +555,91 @@ describe("mapFeatures", () => {
     expect(cli?.summary).toContain("source src/cli.ts");
   });
 
+  it("keeps generated package bins out of owned files when source is missing", async () => {
+    const root = await fixtureRoot("clawpatch-map-bin-generated-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "fixture-cli", bin: { fixture: "./dist/cli.js" } }, null, 2),
+    );
+    await writeFixture(root, "dist/cli.js", "#!/usr/bin/env node\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const cli = result.features.find((feature) => feature.title === "CLI command fixture");
+
+    expect(cli?.entrypoints[0]?.path).toBe("package.json");
+    expect(cli?.ownedFiles).toEqual([
+      { path: "package.json", reason: "package manifest declaring generated bin" },
+    ]);
+    expect(
+      result.features.flatMap((feature) => feature.ownedFiles.map((file) => file.path)),
+    ).not.toContain("dist/cli.js");
+  });
+
+  it("maps generated module and declaration entries back to source files", async () => {
+    const root = await fixtureRoot("clawpatch-map-bin-module-source-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify(
+        {
+          name: "module-cli",
+          exports: { ".": "./dist/index.js", "./types": "./dist/types.d.ts" },
+          bin: {
+            esm: "./dist/esm.mjs",
+            cjs: "./dist/cjs.cjs",
+            pureEsm: "./dist/pure-esm.mjs",
+            pureCjs: "./dist/pure-cjs.cjs",
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFixture(root, "src/esm.mts", "export function esm() {}\n");
+    await writeFixture(root, "src/cjs.cts", "export function cjs() {}\n");
+    await writeFixture(root, "src/pure-esm.mjs", "export function pureEsm() {}\n");
+    await writeFixture(root, "src/pure-cjs.cjs", "exports.pureCjs = true;\n");
+    await writeFixture(root, "src/index.tsx", "export function Index() { return null; }\n");
+    await writeFixture(root, "src/types.ts", "export type Fixture = string;\n");
+    await writeFixture(root, "dist/esm.mjs", "export {};\n");
+    await writeFixture(root, "dist/cjs.cjs", "module.exports = {};\n");
+    await writeFixture(root, "dist/pure-esm.mjs", "export {};\n");
+    await writeFixture(root, "dist/pure-cjs.cjs", "module.exports = {};\n");
+    await writeFixture(root, "dist/index.js", "export {};\n");
+    await writeFixture(root, "dist/types.d.ts", "export type Fixture = string;\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const esm = result.features.find((feature) => feature.title === "CLI command esm");
+    const cjs = result.features.find((feature) => feature.title === "CLI command cjs");
+    const pureEsm = result.features.find((feature) => feature.title === "CLI command pureEsm");
+    const pureCjs = result.features.find((feature) => feature.title === "CLI command pureCjs");
+    const nodePackage = result.features.find(
+      (feature) => feature.title === "Node package module-cli",
+    );
+
+    expect(esm?.entrypoints[0]?.path).toBe("src/esm.mts");
+    expect(cjs?.entrypoints[0]?.path).toBe("src/cjs.cts");
+    expect(pureEsm?.entrypoints[0]?.path).toBe("src/pure-esm.mjs");
+    expect(pureCjs?.entrypoints[0]?.path).toBe("src/pure-cjs.cjs");
+    expect(esm?.ownedFiles).toEqual([{ path: "src/esm.mts", reason: "entrypoint" }]);
+    expect(cjs?.ownedFiles).toEqual([{ path: "src/cjs.cts", reason: "entrypoint" }]);
+    expect(nodePackage?.contextFiles).toContainEqual({
+      path: "src/index.tsx",
+      reason: "package entrypoint",
+    });
+    expect(nodePackage?.contextFiles).toContainEqual({
+      path: "src/types.ts",
+      reason: "package entrypoint",
+    });
+    expect(nodePackage?.contextFiles).not.toContainEqual({
+      path: "dist/index.js",
+      reason: "package entrypoint",
+    });
+  });
+
   it("maps Ruby metadata, executables, source groups, and tests", async () => {
     const root = await fixtureRoot("clawpatch-map-ruby-");
     await writeFixture(
@@ -958,6 +1043,9 @@ describe("mapFeatures", () => {
     const rubyProject = result.features.find(
       (feature) => feature.title === `Ruby project ${root.split("/").at(-1)}`,
     );
+    const nodePackage = result.features.find(
+      (feature) => feature.title === "Node package rails-webpacker-shell",
+    );
     const railsConfig = result.features.find(
       (feature) => feature.title === "Rails application configuration",
     );
@@ -988,6 +1076,10 @@ describe("mapFeatures", () => {
     expect(railsAssetRefs).toContain("app/javascript/stylesheets/application.scss");
     expect(railsAssetRefs).not.toContain("app/javascript/controllers/widgets_controller.js");
     expect(railsAssetRefs).not.toContain("app/assets/builds/application.js");
+    expect(nodePackage?.contextFiles).toContainEqual({
+      path: "app/javascript/controllers/widgets_controller.js",
+      reason: "package source overview",
+    });
     expect(rubyProject?.trustBoundaries).toEqual(
       expect.arrayContaining(["database", "network", "serialization"]),
     );
@@ -1199,6 +1291,151 @@ describe("mapFeatures", () => {
       result.features.find((feature) => feature.title === "Node package @scope/core")?.contextFiles,
     ).toContainEqual({ path: "packages/core/AGENTS.md", reason: "package context" });
     expect(project.detected.packageManagers).toContain("pnpm");
+  });
+
+  it("maps workspace package metadata, entries, tests, and docs as package context", async () => {
+    const root = await fixtureRoot("clawpatch-node-package-context-");
+    await writeFixture(root, "pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+    await writeFixture(
+      root,
+      "packages/core/package.json",
+      JSON.stringify(
+        {
+          name: "@scope/core",
+          exports: { ".": "./dist/index.js", "./worker": { types: "./dist/worker.d.ts" } },
+          scripts: { test: "vitest run" },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFixture(root, "packages/core/tsconfig.json", "{}\n");
+    await writeFixture(root, "packages/core/vitest.config.ts", "export default {};\n");
+    await writeFixture(root, "packages/core/README.md", "# core\n");
+    await writeFixture(root, "packages/core/src/index.ts", "export const core = true;\n");
+    await writeFixture(root, "packages/core/src/worker.ts", "export const worker = true;\n");
+    await writeFixture(root, "packages/core/src/index.test.ts", "import './index';\n");
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const core = result.features.find((feature) => feature.title === "Node package @scope/core");
+
+    expect(core?.ownedFiles).toEqual([
+      { path: "packages/core/package.json", reason: "package manifest" },
+      { path: "packages/core/tsconfig.json", reason: "typescript configuration" },
+      { path: "packages/core/vitest.config.ts", reason: "test configuration" },
+    ]);
+    expect(core?.contextFiles).toContainEqual({
+      path: "packages/core/README.md",
+      reason: "package context",
+    });
+    expect(core?.contextFiles).toContainEqual({
+      path: "packages/core/src/index.ts",
+      reason: "package entrypoint",
+    });
+    expect(core?.contextFiles).toContainEqual({
+      path: "packages/core/src/index.test.ts",
+      reason: "package test",
+    });
+  });
+
+  it("maps extension packages generically and semantically splits large flat source folders", async () => {
+    const root = await fixtureRoot("clawpatch-node-extension-map-");
+    await writeFixture(root, "pnpm-workspace.yaml", "packages:\n  - extensions/*\n");
+    await writeFixture(
+      root,
+      "extensions/chat/package.json",
+      JSON.stringify(
+        {
+          name: "chat-extension",
+          exports: { ".": "./dist/index.js" },
+          scripts: { test: "vitest" },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFixture(root, "extensions/chat/README.md", "# chat\n");
+    await writeFixture(root, "extensions/chat/src/index.ts", "export const chat = true;\n");
+    await writeFixture(root, "extensions/chat/src/runtime.ts", "export const runtime = true;\n");
+    await writeFixture(root, "extensions/chat/src/runtime.test.ts", "import './runtime';\n");
+    for (let index = 0; index < 13; index += 1) {
+      await writeFixture(
+        root,
+        `extensions/chat/src/auth-${String(index).padStart(2, "0")}.ts`,
+        `export const auth${index} = true;\n`,
+      );
+    }
+    for (let index = 0; index < 13; index += 1) {
+      await writeFixture(
+        root,
+        `extensions/chat/src/storage-${String(index).padStart(2, "0")}.ts`,
+        `export const storage${index} = true;\n`,
+      );
+    }
+    await writeFixture(root, "extensions/chat/dist/index.js", "export {};\n");
+    await writeFixture(
+      root,
+      "extensions/chat/src/generated/schema.ts",
+      "export const skip = true;\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const extension = result.features.find(
+      (feature) => feature.title === "Node package chat-extension",
+    );
+    const auth = result.features.find(
+      (feature) => feature.entrypoints[0]?.symbol === "extensions/chat/src/:auth#1",
+    );
+    const storage = result.features.find(
+      (feature) => feature.entrypoints[0]?.symbol === "extensions/chat/src/:storage#1",
+    );
+    const owned = result.features.flatMap((feature) => feature.ownedFiles.map((file) => file.path));
+
+    expect(extension?.source).toBe("node-extension-package");
+    expect(extension?.tags).toContain("extension-package");
+    expect(extension?.contextFiles).toContainEqual({
+      path: "extensions/chat/src/index.ts",
+      reason: "package entrypoint",
+    });
+    expect(auth?.ownedFiles).toHaveLength(12);
+    expect(storage?.ownedFiles).toHaveLength(12);
+    expect(owned).not.toContain("extensions/chat/dist/index.js");
+    expect(owned).not.toContain("extensions/chat/src/generated/schema.ts");
+  });
+
+  it("keeps nested source directories when semantic file labels overlap", async () => {
+    const root = await fixtureRoot("clawpatch-node-semantic-shadow-");
+    await writeFixture(root, "package.json", JSON.stringify({ name: "shadow" }, null, 2));
+    await writeFixture(root, "src/auth.ts", "export const auth = true;\n");
+    await writeFixture(root, "src/auth/login.ts", "export const login = true;\n");
+    await writeFixture(root, "src/auth/token.ts", "export const token = true;\n");
+    await writeFixture(root, "src/auth-files/real.ts", "export const real = true;\n");
+    for (let index = 0; index < 11; index += 1) {
+      await writeFixture(
+        root,
+        `src/other/file-${String(index).padStart(2, "0")}.ts`,
+        `export const other${index} = true;\n`,
+      );
+    }
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const sourceGroups = result.features.filter(
+      (feature) => feature.source === "node-source-group",
+    );
+    const owned = sourceGroups.flatMap((feature) => feature.ownedFiles.map((file) => file.path));
+
+    expect(sourceGroups.map((feature) => feature.entrypoints[0]?.symbol)).toContain("src/:auth");
+    expect(sourceGroups.map((feature) => feature.entrypoints[0]?.symbol)).toContain("src/auth");
+    expect(sourceGroups.map((feature) => feature.entrypoints[0]?.symbol)).toContain(
+      "src/auth-files",
+    );
+    expect(owned).toContain("src/auth.ts");
+    expect(owned).toContain("src/auth/login.ts");
+    expect(owned).toContain("src/auth/token.ts");
+    expect(owned).toContain("src/auth-files/real.ts");
   });
 
   it("maps pnpm workspace packages without a root package manifest", async () => {

@@ -49,6 +49,10 @@ validation commands and records a patch attempt under `.clawpatch/`.
   `lint`, `typecheck`, `format`
 - Node/TypeScript workspace packages under `apps/*`, `packages/*`, and package
   workspace patterns
+- generic extension/plugin packages under workspace roots such as `extensions/*`
+  and `plugins/*`, including package metadata, source, docs, and nearby tests
+- semantic Node source groups for large packages, including runtime, commands,
+  auth, storage, monitor, webhook, setup, server, and client slices
 - Nx project metadata from `project.json`, including project-scoped validation
   targets
 - Turborepo task metadata for workspace-aware validation commands and feature

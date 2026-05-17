@@ -75,12 +75,19 @@ validates that every returned path exists inside the repository before writing
 features. Agent-derived features use `source: agent-mapper` and include the
 mapper reason in the feature summary.
 
-For large Node/TypeScript repositories, source groups are recursively split by
-directory and then chunked so one feature owns at most a small bounded set of
-files. Package-local tests and package context files are attached when they can
-be found cheaply.
+For large Node/TypeScript repositories, package features include package
+metadata such as `package.json`, TypeScript config, Vitest config, docs,
+entrypoints, source overview files, and nearby tests. Source groups are split by
+directory and then by common semantic subdomains such as runtime, commands,
+auth, storage, monitor, webhook, setup, server, and client before falling back
+to bounded chunks.
+Generated/build outputs such as `node_modules`, `dist`, `build`, `.next`, and
+generated source folders are not owned by Node review features.
 Selected `package.json` scripts are mapped for the root package and discovered
 workspace packages, with workspace script titles including the package name.
+Workspace packages under generic extension/plugin roots such as `extensions/*`
+and `plugins/*` are tagged as extension packages and keep package metadata,
+source, docs, and tests together as review context.
 
 In JavaScript/TypeScript monorepos, project discovery runs before framework
 mapping. Workspace packages and Nx projects are normalized into project roots,

@@ -37,6 +37,32 @@ const sourceDirectories = ["src", "lib", "app", "pages", "scripts"] as const;
 const testDirectories = ["test", "tests", "__tests__"] as const;
 const sourceGroupMaxOwnedFiles = 12;
 const sourceGroupMaxTests = 8;
+const packageOverviewMaxContextFiles = 40;
+const semanticSourceSegments = [
+  "monitor",
+  "webhook",
+  "setup",
+  "runtime",
+  "commands",
+  "command",
+  "auth",
+  "storage",
+  "store",
+  "config",
+  "cli",
+  "server",
+  "client",
+  "routes",
+  "tools",
+  "transport",
+  "message",
+  "session",
+  "provider",
+  "plugin",
+  "plugins",
+  "media",
+  "security",
+] as const;
 
 export async function nodeSeeds(root: string, context: MapperContext): Promise<FeatureSeed[]> {
   const packages = context.projects.filter(hasNodePackage);
@@ -69,20 +95,32 @@ async function packageSeeds(
   if (testCommand === null) {
     packageTags.push(suppressedTestCommandTag);
   }
+  if (isExtensionPackage(info)) {
+    packageTags.push("extension-package");
+  }
+
+  const packageOwnedFiles = await packageOwnedMetadataFiles(root, info);
+  const packageOverviewContext = await packageOverviewContextFiles(root, info);
+  const manifestSource = isExtensionPackage(info) ? "node-extension-package" : "node-package";
+  const packageSummary = isExtensionPackage(info)
+    ? `Extension package ${packageName} with package metadata, source, tests, and docs rooted at ${info.root}.`
+    : `Node package ${packageName} with package metadata and review context rooted at ${info.root}.`;
 
   const manifestSeed: FeatureSeed = {
     title: `Node package ${packageName}`,
-    summary: `Node package manifest at ${info.packageJsonPath}.`,
+    summary: packageSummary,
     kind: packageKind(`${packageName} ${info.root}`),
-    source: "node-package",
+    source: manifestSource,
     confidence: "medium",
     entryPath: info.packageJsonPath,
     symbol: packageName,
     route: null,
     command: null,
-    ownedFiles: [{ path: info.packageJsonPath, reason: "package manifest" }],
-    contextFiles: (await projectContextFiles(root, info)).filter(
-      (ref) => ref.path !== info.packageJsonPath,
+    ownedFiles: packageOwnedFiles,
+    contextFiles: uniqueFileRefs(
+      [...(await projectContextFiles(root, info)), ...packageOverviewContext].filter(
+        (ref) => !packageOwnedFiles.some((owned) => owned.path === ref.path),
+      ),
     ),
     tags: packageTags,
     trustBoundaries: packageTrustBoundaries(`${packageName} ${info.root}`),
@@ -90,20 +128,22 @@ async function packageSeeds(
   };
 
   for (const [command, path] of Object.entries(packageBins(info.packageJson))) {
-    const entryPath = await resolvePackageBinEntry(root, info.root, path);
+    const bin = await resolvePackageBinEntry(root, info, path);
     seeds.push({
       title: `CLI command ${command}`,
       summary:
-        entryPath === packageRelativePath(info.root, normalizePackagePath(path))
+        bin.entryPath === packageRelativePath(info.root, normalizePackagePath(path))
           ? `Package bin '${command}' at ${path}.`
-          : `Package bin '${command}' at ${path}, source ${entryPath}.`,
+          : `Package bin '${command}' at ${path}, source ${bin.entryPath}.`,
       kind: "cli-command",
       source: "package-json-bin",
-      confidence: "high",
-      entryPath,
+      confidence: bin.confidence,
+      entryPath: bin.entryPath,
       symbol: null,
       route: null,
       command,
+      ownedFiles: bin.ownedFiles,
+      contextFiles: bin.contextFiles,
       tags: ["node", "cli", ...(testCommand === null ? [suppressedTestCommandTag] : [])],
       trustBoundaries: ["user-input", "filesystem", "process-exec"],
       ...(testCommand === undefined ? {} : { testCommand }),
@@ -168,7 +208,7 @@ async function sourceGroupSeeds(
     if (files.length === 0) {
       continue;
     }
-    for (const group of partitionFileGroups(sourceRoot, files, sourceGroupMaxOwnedFiles)) {
+    for (const group of partitionNodeFileGroups(sourceRoot, files, sourceGroupMaxOwnedFiles)) {
       const tests = associatedTests(group.files, testFiles, testCommand ?? null);
       seeds.push({
         title: `Node source ${group.label}`,
@@ -207,6 +247,123 @@ async function sourceGroupSeeds(
   }
 
   return seeds;
+}
+
+async function packageOwnedMetadataFiles(root: string, info: PackageInfo): Promise<SeedFileRef[]> {
+  return existingFileRefs(root, [
+    { path: info.packageJsonPath, reason: "package manifest" },
+    { path: packageRelativePath(info.root, "tsconfig.json"), reason: "typescript configuration" },
+    {
+      path: packageRelativePath(info.root, "tsconfig.build.json"),
+      reason: "typescript build configuration",
+    },
+    { path: packageRelativePath(info.root, "vitest.config.ts"), reason: "test configuration" },
+    { path: packageRelativePath(info.root, "vitest.config.mts"), reason: "test configuration" },
+    { path: packageRelativePath(info.root, "vite.config.ts"), reason: "build configuration" },
+    { path: packageRelativePath(info.root, "tsdown.config.ts"), reason: "build configuration" },
+  ]);
+}
+
+async function packageOverviewContextFiles(
+  root: string,
+  info: PackageInfo,
+): Promise<SeedFileRef[]> {
+  const docs = await existingFileRefs(root, [
+    { path: packageRelativePath(info.root, "README.md"), reason: "package documentation" },
+    { path: packageRelativePath(info.root, "AGENTS.md"), reason: "package instructions" },
+    { path: packageRelativePath(info.root, "CHANGELOG.md"), reason: "package changelog" },
+  ]);
+  const entryRefs = await packageEntryContextFiles(root, info);
+  const sourceRefs = await packageSourceOverviewRefs(root, info);
+  const testRefs = (await packageTestFiles(root, info))
+    .slice(0, 12)
+    .map((path) => ({ path, reason: "package test" }));
+  return uniqueFileRefs([...docs, ...entryRefs, ...sourceRefs, ...testRefs]).slice(
+    0,
+    packageOverviewMaxContextFiles,
+  );
+}
+
+async function packageEntryContextFiles(root: string, info: PackageInfo): Promise<SeedFileRef[]> {
+  const entries = new Set<string>();
+  for (const path of Object.values(packageBins(info.packageJson))) {
+    const normalized = normalizePackagePath(path);
+    const sourceCandidates = sourceCandidatesForGeneratedOutput(normalized);
+    for (const candidate of sourceCandidates) {
+      entries.add(packageRelativePath(info.root, candidate));
+    }
+    if (sourceCandidates.length === 0) {
+      entries.add(packageRelativePath(info.root, normalized));
+    }
+  }
+  for (const path of packageExportPaths(info.packageJson)) {
+    const normalized = normalizePackagePath(path);
+    const sourceCandidates = sourceCandidatesForGeneratedOutput(normalized);
+    for (const candidate of sourceCandidates) {
+      entries.add(packageRelativePath(info.root, candidate));
+    }
+    if (sourceCandidates.length === 0) {
+      entries.add(packageRelativePath(info.root, normalized));
+    }
+  }
+  return existingFileRefs(
+    root,
+    [...entries].map((path) => ({ path, reason: "package entrypoint" })),
+  );
+}
+
+function packageExportPaths(pkg: PackageInfo["packageJson"]): string[] {
+  const output: string[] = [];
+  for (const value of [pkg.main, pkg.module, pkg.types]) {
+    if (typeof value === "string") {
+      output.push(value);
+    }
+  }
+  collectExportPaths(pkg.exports, output);
+  return [...new Set(output)];
+}
+
+function collectExportPaths(value: unknown, output: string[]): void {
+  if (typeof value === "string") {
+    output.push(value);
+    return;
+  }
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+  for (const item of Object.values(value)) {
+    collectExportPaths(item, output);
+  }
+}
+
+async function packageSourceOverviewRefs(root: string, info: PackageInfo): Promise<SeedFileRef[]> {
+  const railsPackage = await isRailsPackage(root, info.root);
+  const sourceRoots = packageSourceRoots(info, railsPackage);
+  const files = (
+    await Promise.all(
+      sourceRoots.map(async (sourceRoot) =>
+        (await walk(root, [sourceRoot])).filter(
+          (path) =>
+            isReviewableNodeSourceFile(path) &&
+            !isRailsExcludedNodeSourcePath(info, railsPackage, sourceRoot, path),
+        ),
+      ),
+    )
+  )
+    .flat()
+    .filter((path, index, all) => all.indexOf(path) === index)
+    .slice(0, 24);
+  return files.map((path) => ({ path, reason: "package source overview" }));
+}
+
+async function existingFileRefs(root: string, refs: SeedFileRef[]): Promise<SeedFileRef[]> {
+  const output: SeedFileRef[] = [];
+  for (const ref of uniqueFileRefs(refs)) {
+    if (await pathExists(join(root, ref.path))) {
+      output.push(ref);
+    }
+  }
+  return output;
 }
 
 function packageSourceRoots(info: PackageInfo, railsPackage: boolean): string[] {
@@ -286,34 +443,91 @@ function associatedTests(files: string[], tests: string[], command: string | nul
 
 async function resolvePackageBinEntry(
   root: string,
-  packageRoot: string,
+  info: PackageInfo,
   path: string,
-): Promise<string> {
+): Promise<{
+  entryPath: string;
+  ownedFiles: SeedFileRef[];
+  contextFiles: SeedFileRef[];
+  confidence: FeatureSeed["confidence"];
+}> {
   const normalized = normalizePackagePath(path);
-  const source = sourceCandidateForGeneratedBin(normalized);
-  const candidate = packageRelativePath(packageRoot, source ?? normalized);
-  if (source === null) {
-    return candidate;
+  const sourceCandidates = sourceCandidatesForGeneratedOutput(normalized);
+  if (sourceCandidates.length === 0) {
+    const candidate = packageRelativePath(info.root, normalized);
+    return {
+      entryPath: candidate,
+      ownedFiles: [{ path: candidate, reason: "package bin entrypoint" }],
+      contextFiles: [{ path: info.packageJsonPath, reason: "package manifest" }],
+      confidence: "high",
+    };
   }
-  return (await pathExists(join(root, candidate)))
-    ? candidate
-    : packageRelativePath(packageRoot, normalized);
+  for (const source of sourceCandidates) {
+    const candidate = packageRelativePath(info.root, source);
+    if (await pathExists(join(root, candidate))) {
+      return {
+        entryPath: candidate,
+        ownedFiles: [{ path: candidate, reason: "entrypoint" }],
+        contextFiles: [{ path: info.packageJsonPath, reason: "package manifest" }],
+        confidence: "high",
+      };
+    }
+  }
+  return {
+    entryPath: info.packageJsonPath,
+    ownedFiles: [
+      { path: info.packageJsonPath, reason: "package manifest declaring generated bin" },
+    ],
+    contextFiles: [],
+    confidence: "low",
+  };
 }
 
-function sourceCandidateForGeneratedBin(path: string): string | null {
+function sourceCandidatesForGeneratedOutput(path: string): string[] {
   const match = /^(?:dist|build)\/(.+)$/u.exec(path);
   if (match === null) {
-    return null;
+    return [];
   }
   const suffix = match[1];
   if (suffix === undefined) {
-    return null;
+    return [];
+  }
+  if (suffix.endsWith(".d.mts")) {
+    const stem = suffix.slice(0, -".d.mts".length);
+    return [`src/${stem}.mts`, `src/${stem}.ts`, `src/${stem}.tsx`];
+  }
+  if (suffix.endsWith(".d.cts")) {
+    const stem = suffix.slice(0, -".d.cts".length);
+    return [`src/${stem}.cts`, `src/${stem}.ts`, `src/${stem}.tsx`];
+  }
+  if (suffix.endsWith(".d.ts")) {
+    const stem = suffix.slice(0, -".d.ts".length);
+    return [`src/${stem}.ts`, `src/${stem}.tsx`];
   }
   const extension = extname(suffix);
-  if (![".js", ".mjs", ".cjs"].includes(extension)) {
-    return null;
+  const stem = suffix.slice(0, -extension.length);
+  if (extension === ".mjs") {
+    return [
+      `src/${stem}.mts`,
+      `src/${stem}.ts`,
+      `src/${stem}.tsx`,
+      `src/${stem}.mjs`,
+      `src/${stem}.js`,
+    ];
   }
-  return `src/${suffix.slice(0, -extension.length)}.ts`;
+  if (extension === ".cjs") {
+    return [
+      `src/${stem}.cts`,
+      `src/${stem}.ts`,
+      `src/${stem}.tsx`,
+      `src/${stem}.cjs`,
+      `src/${stem}.js`,
+    ];
+  }
+  if (extension === ".js") {
+    return [`src/${stem}.ts`, `src/${stem}.tsx`, `src/${stem}.js`, `src/${stem}.jsx`];
+  }
+  return [];
 }
 
 function normalizePackagePath(path: string): string {
@@ -326,7 +540,110 @@ function isReviewableNodeSourceFile(path: string): boolean {
     !isNodeTestPath(path) &&
     !/\.d\.[cm]?ts$/u.test(path) &&
     !/(^|\/)(__fixtures__|fixtures|testdata)(\/|$)/u.test(path) &&
+    !/(^|\/)(generated|__generated__)(\/|$)/iu.test(path) &&
     !/(^|\/)[^/]*(?:generated|\.gen)\.[^.]+$/iu.test(path)
+  );
+}
+
+function partitionNodeFileGroups(
+  sourceRoot: string,
+  files: string[],
+  maxFiles: number,
+): ReturnType<typeof partitionFileGroups> {
+  if (files.length <= maxFiles) {
+    return partitionFileGroups(sourceRoot, files, maxFiles);
+  }
+  const buckets = new Map<string, string[]>();
+  const fallbackFiles: string[] = [];
+  for (const file of files) {
+    const relativePath = file.slice(sourceRoot.length + 1);
+    if (relativePath.includes("/")) {
+      fallbackFiles.push(file);
+      continue;
+    }
+    const segment = semanticSegmentForFile(file);
+    if (segment === null) {
+      fallbackFiles.push(file);
+      continue;
+    }
+    const bucket = buckets.get(segment) ?? [];
+    bucket.push(file);
+    buckets.set(segment, bucket);
+  }
+  if (buckets.size === 0) {
+    return partitionFileGroups(sourceRoot, files, maxFiles);
+  }
+  const fallbackGroups = partitionFileGroups(sourceRoot, fallbackFiles, maxFiles);
+  const fallbackLabels = new Set(fallbackGroups.map((group) => group.label));
+  const output: ReturnType<typeof partitionFileGroups> = [];
+  for (const [segment, bucketFiles] of [...buckets.entries()].toSorted(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    output.push(
+      ...chunkSemanticGroup(
+        semanticFileGroupLabel(sourceRoot, segment, fallbackLabels),
+        bucketFiles,
+        maxFiles,
+      ),
+    );
+  }
+  output.push(...fallbackGroups);
+  return output;
+}
+
+function semanticFileGroupLabel(
+  sourceRoot: string,
+  segment: string,
+  existing: Set<string>,
+): string {
+  let label = `${sourceRoot}/:${segment}`;
+  let index = 2;
+  while (existing.has(label)) {
+    label = `${sourceRoot}/:${segment}#${index}`;
+    index += 1;
+  }
+  return label;
+}
+
+function chunkSemanticGroup(
+  label: string,
+  files: string[],
+  maxFiles: number,
+): ReturnType<typeof partitionFileGroups> {
+  const sortedFiles = files.toSorted();
+  if (sortedFiles.length <= maxFiles) {
+    return [{ label, files: sortedFiles }];
+  }
+  const groups: ReturnType<typeof partitionFileGroups> = [];
+  for (let index = 0; index < sortedFiles.length; index += maxFiles) {
+    groups.push({
+      label: `${label}#${Math.floor(index / maxFiles) + 1}`,
+      files: sortedFiles.slice(index, index + maxFiles),
+    });
+  }
+  return groups;
+}
+
+function semanticSegmentForFile(path: string): string | null {
+  const basenameWithoutExtension = basename(path)
+    .replace(/\.[^.]+$/u, "")
+    .toLowerCase();
+  const tokens = new Set(
+    basenameWithoutExtension.split(/[^a-z0-9]+/u).filter((token) => token.length > 0),
+  );
+  for (const segment of semanticSourceSegments) {
+    if (tokens.has(segment) || basenameWithoutExtension.includes(segment)) {
+      return segment === "command" ? "commands" : segment;
+    }
+  }
+  return null;
+}
+
+function isExtensionPackage(info: PackageInfo): boolean {
+  return (
+    pathMatchesPrefix(info.root, "extensions") ||
+    pathMatchesPrefix(info.root, "plugins") ||
+    /\b(plugin|extension)\b/iu.test(projectDisplayName(info))
   );
 }
 

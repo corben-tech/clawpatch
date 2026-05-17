@@ -12,6 +12,10 @@ export type NodePackageJson = {
   dependencies?: unknown;
   devDependencies?: unknown;
   bin?: unknown;
+  exports?: unknown;
+  main?: unknown;
+  module?: unknown;
+  types?: unknown;
   workspaces?: unknown;
 };
 
@@ -205,6 +209,11 @@ async function existingProjectContextFiles(
     { path: packageRelativePath(project.root, "README.md"), reason: "package context" },
     { path: packageRelativePath(project.root, "AGENTS.md"), reason: "package context" },
     { path: packageRelativePath(project.root, "tsconfig.json"), reason: "package context" },
+    { path: packageRelativePath(project.root, "tsconfig.build.json"), reason: "package context" },
+    { path: packageRelativePath(project.root, "vitest.config.ts"), reason: "test configuration" },
+    { path: packageRelativePath(project.root, "vitest.config.mts"), reason: "test configuration" },
+    { path: packageRelativePath(project.root, "vite.config.ts"), reason: "build configuration" },
+    { path: packageRelativePath(project.root, "tsdown.config.ts"), reason: "build configuration" },
     { path: packageRelativePath(project.root, "next.config.js"), reason: "project context" },
     { path: packageRelativePath(project.root, "next.config.mjs"), reason: "project context" },
     { path: packageRelativePath(project.root, "next.config.ts"), reason: "project context" },
