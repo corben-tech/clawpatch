@@ -10,6 +10,7 @@ import {
   reviewJsonSchema,
   revalidateJsonSchema,
 } from "./provider-schema.js";
+import { extractJson, parseCodexJson, safeProviderPreview } from "./provider-json.js";
 import {
   AgentMapOutput,
   FixPlanOutput,
@@ -22,11 +23,12 @@ import {
   type ReasoningEffort,
 } from "./types.js";
 
+export { extractJson } from "./provider-json.js";
+
 export type ProviderOptions = {
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
 };
-
 export type Provider = {
   name: string;
   check(root: string): Promise<string>;
@@ -739,68 +741,6 @@ function grokEnvelopeText(value: unknown): string | null {
   return null;
 }
 
-export function extractJson(text: string): unknown | null {
-  try {
-    return JSON.parse(text);
-  } catch {}
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/u);
-  if (fenceMatch && fenceMatch[1]) {
-    const candidate = fenceMatch[1].trim();
-    try {
-      return JSON.parse(candidate);
-    } catch {}
-  }
-  const firstBrace = text.indexOf("{");
-  if (firstBrace !== -1) {
-    let depth = 0;
-    let inString = false;
-    let escape = false;
-    for (let i = firstBrace; i < text.length; i += 1) {
-      const ch = text[i];
-      if (escape) {
-        escape = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escape = true;
-        continue;
-      }
-      if (ch === '"') {
-        inString = !inString;
-        continue;
-      }
-      if (!inString) {
-        if (ch === "{") depth += 1;
-        else if (ch === "}") {
-          depth -= 1;
-          if (depth === 0) {
-            const candidate = text.slice(firstBrace, i + 1);
-            try {
-              return JSON.parse(candidate);
-            } catch {
-              return null;
-            }
-          }
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function parseCodexJson(raw: string): unknown {
-  const parsed = extractJson(raw.trim());
-  if (parsed !== null) {
-    return parsed;
-  }
-  const preview = safeProviderPreview(raw);
-  throw new ClawpatchError(
-    `codex provider produced unparseable JSON output (preview: ${preview})`,
-    8,
-    "malformed-output",
-  );
-}
-
 function providerExitCode(stderr: string): number {
   if (/auth|login|api key|unauthorized|wrong api key/iu.test(stderr)) {
     return 4;
@@ -866,10 +806,6 @@ function stringPart(label: string, value: unknown, maxLength = 80): string {
   }
   const preview = safeProviderPreview(String(value), maxLength);
   return preview.length === 0 ? "" : `${label}=${preview}`;
-}
-
-function safeProviderPreview(value: string, maxLength = 200): string {
-  return value.replace(/\s+/gu, " ").trim().slice(0, maxLength);
 }
 
 function acpxExitCode(stdout: string, stderr: string, exitCode: number | null): number {
