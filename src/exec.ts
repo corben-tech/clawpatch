@@ -9,6 +9,19 @@ export async function runCommand(
   input?: string,
   options: { trimOutput?: boolean } = {},
 ): Promise<CommandResult> {
+  const result = await runCommandRaw(command, cwd, input);
+  return {
+    ...result,
+    stdout: options.trimOutput === false ? result.stdout : trimOutput(result.stdout),
+    stderr: options.trimOutput === false ? result.stderr : trimOutput(result.stderr),
+  };
+}
+
+export async function runCommandRaw(
+  command: string,
+  cwd: string,
+  input?: string,
+): Promise<CommandResult> {
   const started = Date.now();
   const child = spawn(command, {
     cwd,
@@ -47,8 +60,8 @@ export async function runCommand(
     cwd,
     exitCode,
     durationMs: Date.now() - started,
-    stdout: options.trimOutput === false ? stdout : trimOutput(stdout),
-    stderr: options.trimOutput === false ? stderr : trimOutput(stderr),
+    stdout,
+    stderr,
   };
 }
 
