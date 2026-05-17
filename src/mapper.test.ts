@@ -5068,6 +5068,46 @@ describe("mapFeatures", () => {
     ).toBe(false);
   });
 
+  it("does not treat apply-false Android plugin declarations with GString versions as Android modules", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-android-gstring-apply-false-");
+    await writeFixture(root, "settings.gradle", "pluginManagement {}\n");
+    await writeFixture(
+      root,
+      "build.gradle",
+      [
+        "plugins {",
+        '  id "com.android.application" version "${agpVersion}" apply false',
+        '  id "org.jetbrains.kotlin.jvm"',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/api/OrderController.kt",
+      [
+        "package com.example.api",
+        "",
+        "import org.springframework.web.bind.annotation.RestController",
+        "",
+        "@RestController",
+        "class OrderController",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const web = result.features.find((feature) =>
+      feature.title.startsWith("Kotlin server role web entrypoint "),
+    );
+
+    expect(web?.source).toBe("kotlin-server-role-web-entrypoint");
+    expect(
+      result.features.some((feature) => feature.source.startsWith("kotlin-android-role-")),
+    ).toBe(false);
+  });
+
   it("does not treat apply-false version-catalog Android plugin aliases as Android modules", async () => {
     const root = await fixtureRoot("clawpatch-kotlin-android-alias-apply-false-module-");
     await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
@@ -6211,6 +6251,39 @@ describe("mapFeatures", () => {
         "package com.example.jobs",
         "",
         "import com.example.local.*",
+        "import org.scheduler.*",
+        "",
+        "class JobFactory : JobFactoryBase()",
+        "",
+      ].join("\n"),
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const framework = result.features.find(
+      (feature) =>
+        feature.source === "kotlin-server-role-framework-component" &&
+        feature.ownedFiles.some(
+          (file) => file.path === "src/main/kotlin/com/example/jobs/JobFactory.kt",
+        ),
+    );
+
+    expect(framework?.ownedFiles[0]?.reason).toContain(
+      "inherits external type org.scheduler.JobFactoryBase",
+    );
+  });
+
+  it("skips non-external Kotlin wildcard imports before external wildcards", async () => {
+    const root = await fixtureRoot("clawpatch-kotlin-non-external-wildcard-skip-");
+    await writeFixture(root, "settings.gradle.kts", "pluginManagement {}\n");
+    await writeFixture(root, "build.gradle.kts", 'plugins { id("org.jetbrains.kotlin.jvm") }\n');
+    await writeFixture(
+      root,
+      "src/main/kotlin/com/example/jobs/JobFactory.kt",
+      [
+        "package com.example.jobs",
+        "",
+        "import java.util.*",
         "import org.scheduler.*",
         "",
         "class JobFactory : JobFactoryBase()",

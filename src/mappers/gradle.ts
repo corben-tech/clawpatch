@@ -7,6 +7,7 @@ import { FeatureSeed, SeedTestRef } from "./types.js";
 
 const maxOwnedFiles = 12;
 const maxTests = 8;
+const emptyProjectPackages = new Set<string>();
 const kotlinBuiltinTypes = new Set([
   "AbstractMethodError",
   "AbstractCollection",
@@ -1062,7 +1063,7 @@ function kotlinImportForType(
           continue;
         }
         const wildcardType = `${full.slice(0, -1)}${type}`;
-        if (!isKotlinStdlibImport(wildcardType)) {
+        if (isKotlinExternalCandidateImport(wildcardType)) {
           return wildcardType;
         }
       }
@@ -1075,7 +1076,7 @@ function kotlinImportForType(
         continue;
       }
       const wildcardType = `${full.slice(0, -1)}${type}`;
-      if (!isKotlinStdlibImport(wildcardType)) {
+      if (isKotlinExternalCandidateImport(wildcardType)) {
         return wildcardType;
       }
     }
@@ -1137,7 +1138,7 @@ function kotlinWildcardImportCandidates(
   return [...info.imports.values()]
     .filter((full) => full.endsWith(".*") && !kotlinPackageTypes.has(full.slice(0, -2)))
     .map((full) => `${full.slice(0, -1)}${type}`)
-    .filter((full) => !isKotlinStdlibImport(full));
+    .filter(isKotlinExternalCandidateImport);
 }
 
 function kotlinPathRoleEvidence(filePath: string, tags: string[]): KotlinRoleEvidence[] {
@@ -1188,6 +1189,10 @@ function isKotlinBuiltinType(type: string): boolean {
 
 function isKotlinStdlibImport(full: string): boolean {
   return full.startsWith("kotlin.");
+}
+
+function isKotlinExternalCandidateImport(full: string): boolean {
+  return isExternalProjectImport(full, emptyProjectPackages);
 }
 
 function isKotlinServerWebAnnotation(info: KotlinFileInfo, annotation: string): boolean {
@@ -2116,10 +2121,34 @@ function androidPluginDeclarationPattern(): RegExp {
 }
 
 function gradlePluginInvocationEnd(source: string, start: number): number {
-  const next = /[;}]|\n\s*(?:id\s*(?:\(|["'])|alias\s*\(|kotlin\s*\()/u.exec(
-    source.slice(start + 1),
-  );
-  return next === null ? source.length : start + 1 + next.index;
+  let quote: "'" | '"' | null = null;
+  for (let index = start + 1; index < source.length; index += 1) {
+    const char = source[index] ?? "";
+    if (quote !== null) {
+      if (char === "\\") {
+        index += 1;
+        continue;
+      }
+      if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === ";" || char === "}") {
+      return index;
+    }
+    if (
+      char === "\n" &&
+      /^\s*(?:id\s*(?:\(|["'])|alias\s*\(|kotlin\s*\()/u.test(source.slice(index + 1))
+    ) {
+      return index;
+    }
+  }
+  return source.length;
 }
 
 function normalizeVersionCatalogAlias(alias: string): string {
