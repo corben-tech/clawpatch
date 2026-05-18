@@ -1763,9 +1763,12 @@ describe("mapFeatures", () => {
         " */ import { Router as MultilineBannerRouter } from 'express';",
         "import unused from 'unused'; /* stacked */ /* import banner */ import { Router as SemicolonBannerRouter } from 'express';",
         "import from, { Router as FromBindingRouter } from 'express';",
+        "import 'reflect-metadata'",
         "import/* type banner */type { Router as CommentedTypeRouter } from 'express';",
         "import express, { Router, Router as ExpressRouter } from 'express';",
         "",
+        "const config = { import: true }",
+        "export type { Router as ExportedTypeRouter } from 'express';",
         "const app = express();",
         "const otherRouter = OtherRouter();",
         "const commentedOutRouter = CommentedOutRouter();",
@@ -1776,6 +1779,7 @@ describe("mapFeatures", () => {
         "const semicolonBannerRouter = SemicolonBannerRouter();",
         "const fromBindingRouter = FromBindingRouter();",
         "const commentedTypeRouter = CommentedTypeRouter();",
+        "const exportedTypeRouter = ExportedTypeRouter();",
         "const typedRouter: Router = Router();",
         "const projectRouter = Router({ mergeParams: true });",
         "let hitCount = 0;",
@@ -1795,6 +1799,7 @@ describe("mapFeatures", () => {
         "semicolonBannerRouter.get('/semicolon-banner-router', listSemicolonBannerRouter);",
         "fromBindingRouter.get('/from-binding-router', listFromBindingRouter);",
         "commentedTypeRouter.get('/commented-type-router', ignoredCommentedTypeRouter);",
+        "exportedTypeRouter.get('/exported-type-router', ignoredExportedTypeRouter);",
         "router.post<{ Body: CreateJob }>('/typed-jobs', createTypedJob);",
         "typedRouter.patch('/typed/:id', updateTyped);",
         "router.route('/users').get(listUsers).delete(deleteUsers);",
@@ -1821,6 +1826,7 @@ describe("mapFeatures", () => {
         "function listSemicolonBannerRouter() {}",
         "function listFromBindingRouter() {}",
         "function ignoredCommentedTypeRouter() {}",
+        "function ignoredExportedTypeRouter() {}",
         "function createTypedJob() {}",
         "function updateTyped() {}",
         "function listUsers() {}",
@@ -2027,6 +2033,7 @@ describe("mapFeatures", () => {
     expect(titles).not.toContain("Express route GET /other-router");
     expect(titles).not.toContain("Express route GET /commented-out-router");
     expect(titles).not.toContain("Express route GET /commented-type-router");
+    expect(titles).not.toContain("Express route GET /exported-type-router");
     expect(titles).not.toContain("Express route GET /custom-import-router");
     expect(titles).not.toContain("Express route GET /custom-router");
     expect(titles).not.toContain("Express route GET /custom-alias-router");

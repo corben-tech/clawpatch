@@ -356,8 +356,13 @@ function readExpressStaticImportClause(source: string, importIndex: number): str
   if (
     source[cursor] === "(" ||
     source[cursor] === "." ||
+    source[cursor] === "'" ||
+    source[cursor] === '"' ||
     (source.startsWith("type", cursor) && !isIdentifierChar(source[cursor + "type".length]))
   ) {
+    return null;
+  }
+  if (!isImportClauseStart(source[cursor])) {
     return null;
   }
   const clauseStart = cursor;
@@ -542,6 +547,10 @@ function isKeywordAt(source: string, index: number, keyword: string): boolean {
 
 function isIdentifierChar(char: string | undefined): boolean {
   return char !== undefined && /[A-Za-z0-9_$]/u.test(char);
+}
+
+function isImportClauseStart(char: string | undefined): boolean {
+  return char !== undefined && (char === "{" || char === "*" || /[A-Za-z_$]/u.test(char));
 }
 
 function skipWhitespace(source: string, start: number): number {
