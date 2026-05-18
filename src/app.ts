@@ -723,7 +723,10 @@ export async function fixCommand(
   const findingId = assertDefined(stringFlag(flags, "finding"), "missing --finding");
   const config = applyProviderFlags(loaded.config, flags);
   const git = await discoverGit(loaded.root);
-  const dirty = await hasSourceDirtyWorktree(loaded.root, loaded.paths.stateDir);
+  const dirty =
+    git.root === null && config.provider.skipGitRepoCheck
+      ? false
+      : await hasSourceDirtyWorktree(loaded.root, loaded.paths.stateDir);
   if (config.git.requireCleanWorktreeForFix && dirty && flags["dryRun"] !== true) {
     throw new ClawpatchError(
       "dirty worktree blocks fix; commit/stash first or use --dry-run",
@@ -942,6 +945,7 @@ function applyProviderFlags(
       name: providerName ?? config.provider.name,
       model: model ?? config.provider.model,
       reasoningEffort: reasoningEffort ?? config.provider.reasoningEffort,
+      skipGitRepoCheck: flags["skipGitRepoCheck"] === true,
     },
   };
 }
@@ -950,6 +954,7 @@ function providerOptions(config: ReturnType<typeof applyProviderFlags>) {
   return {
     model: config.provider.model,
     reasoningEffort: config.provider.reasoningEffort,
+    skipGitRepoCheck: config.provider.skipGitRepoCheck,
   };
 }
 

@@ -146,7 +146,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 const commandFlags = {
   init: new Set(["force"]),
-  map: new Set(["dryRun", "source", "provider", "model", "reasoningEffort"]),
+  map: new Set(["dryRun", "source", "provider", "model", "reasoningEffort", "skipGitRepoCheck"]),
   status: new Set<string>(),
   review: new Set([
     "feature",
@@ -158,13 +158,14 @@ const commandFlags = {
     "provider",
     "model",
     "reasoningEffort",
+    "skipGitRepoCheck",
     "dryRun",
   ]),
   report: new Set(["status", "severity", "feature", "project", "category", "triage", "output"]),
   show: new Set(["finding"]),
   next: new Set(["status", "project"]),
   triage: new Set(["finding", "status", "note"]),
-  fix: new Set(["finding", "provider", "model", "reasoningEffort", "dryRun"]),
+  fix: new Set(["finding", "provider", "model", "reasoningEffort", "skipGitRepoCheck", "dryRun"]),
   revalidate: new Set([
     "finding",
     "all",
@@ -178,6 +179,7 @@ const commandFlags = {
     "provider",
     "model",
     "reasoningEffort",
+    "skipGitRepoCheck",
   ]),
   doctor: new Set(["provider", "model", "reasoningEffort"]),
   "clean-locks": new Set<string>(),
@@ -221,6 +223,7 @@ const booleanFlagNames = new Set([
   "no-color",
   "no-input",
   "dry-run",
+  "skip-git-repo-check",
   "force",
   "all",
 ]);
@@ -384,6 +387,7 @@ Flags:
   --provider <name>
   --model <name>
   --reasoning-effort <none|minimal|low|medium|high|xhigh>
+  --skip-git-repo-check
   --dry-run
   --json
   -q, --quiet
@@ -458,6 +462,7 @@ Flags:
   --provider <name>
   --model <name>
   --reasoning-effort <none|minimal|low|medium|high|xhigh>
+  --skip-git-repo-check
   --dry-run
   --json
 `);
@@ -486,6 +491,7 @@ Flags:
   --provider <name>
   --model <name>
   --reasoning-effort <none|minimal|low|medium|high|xhigh>
+  --skip-git-repo-check
   --dry-run
   --json
 `);
@@ -511,6 +517,7 @@ Flags:
   --provider <name>
   --model <name>
   --reasoning-effort <none|minimal|low|medium|high|xhigh>
+  --skip-git-repo-check
   --json
 `);
     return;

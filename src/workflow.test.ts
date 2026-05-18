@@ -230,6 +230,9 @@ describe("workflow", () => {
       dryRun: true,
       reasoningEffort: "xhigh",
     });
+    expect(parseArgs(["review", "--skip-git-repo-check"]).flags).toMatchObject({
+      skipGitRepoCheck: true,
+    });
     expect(parseArgs(["fix", "--finding", "f", "--dry-run"]).flags).toMatchObject({
       dryRun: true,
       finding: "f",
@@ -1176,13 +1179,13 @@ describe("workflow", () => {
     const first = await mapWithSource(root, project, [], heuristic, {
       source: "agent",
       provider,
-      providerOptions: { model: null, reasoningEffort: null },
+      providerOptions: { model: null, reasoningEffort: null, skipGitRepoCheck: false },
     });
     title = "Background worker package";
     const second = await mapWithSource(root, project, first.features, heuristic, {
       source: "agent",
       provider,
-      providerOptions: { model: null, reasoningEffort: null },
+      providerOptions: { model: null, reasoningEffort: null, skipGitRepoCheck: false },
     });
 
     expect(first.features).toHaveLength(1);
@@ -2046,6 +2049,40 @@ describe("workflow", () => {
       code: "dirty-worktree",
     });
 
+    delete process.env["CLAWPATCH_PROVIDER"];
+  });
+
+  it("allows fix in non-Git roots when the Codex Git check is explicitly skipped", async () => {
+    const root = await fixtureRoot("clawpatch-non-git-fix-skip-");
+    await writeFixture(
+      root,
+      "package.json",
+      JSON.stringify({ name: "buggy", bin: { buggy: "src/index.ts" } }),
+    );
+    await writeFixture(root, "src/index.ts", "export const value = 'TODO_BUG';\n");
+    process.env["CLAWPATCH_PROVIDER"] = "mock";
+    const context = await makeContext(testOptions(root));
+
+    await initCommand(context, {});
+    await mapCommand(context);
+    const reviewed = (await reviewCommand(context, { limit: "1" })) as { next: string };
+    const finding = reviewed.next.split(" ").at(-1) ?? "";
+    const paths = statePaths(join(root, ".clawpatch"));
+    const feature = (await readFeatures(paths))[0];
+    await writeFeature(paths, {
+      ...feature!,
+      tests: [
+        {
+          path: "src/index.test.ts",
+          command: "node -e \"require('node:fs').appendFileSync('src/index.ts','// fixed\\n')\"",
+        },
+      ],
+    });
+    const fixed = await fixCommand(context, { finding, skipGitRepoCheck: true });
+    const patches = await readPatchAttempts(paths);
+
+    expect(fixed).toMatchObject({ dryRun: false, status: "applied", filesChanged: 1 });
+    expect(patches[0]?.filesChanged).toEqual(["src/index.ts"]);
     delete process.env["CLAWPATCH_PROVIDER"];
   });
 
