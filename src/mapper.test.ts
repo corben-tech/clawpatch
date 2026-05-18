@@ -205,7 +205,11 @@ describe("mapFeatures", () => {
       "apps/web/src/app/api/things/route.ts",
       "export function GET() { return new Response('ok'); }\n",
     );
-    await writeFixture(root, "apps/admin/package.json", JSON.stringify({ name: "admin" }, null, 2));
+    await writeFixture(
+      root,
+      "apps/admin/package.json",
+      JSON.stringify({ name: "admin", scripts: { dev: "next dev" } }, null, 2),
+    );
     await writeFixture(
       root,
       "apps/admin/project.json",
@@ -275,7 +279,7 @@ describe("mapFeatures", () => {
     ).toBe("apps/site/src/pages/about.tsx");
   });
 
-  it("does not treat non-Next package scripts as hoisted Next projects", async () => {
+  it("does not treat package scripts without Next commands as hoisted Next projects", async () => {
     const root = await fixtureRoot("clawpatch-map-next-hoisted-script-helper-");
     await writeFixture(
       root,
@@ -291,7 +295,6 @@ describe("mapFeatures", () => {
       "apps/site/package.json",
       JSON.stringify({ name: "site", scripts: { sitemap: "next-sitemap" } }, null, 2),
     );
-    await writeFixture(root, "apps/site/vite.config.ts", "export default {};\n");
     await writeFixture(
       root,
       "apps/site/src/pages/about.tsx",
@@ -355,8 +358,8 @@ describe("mapFeatures", () => {
     );
   });
 
-  it("does not treat non-Next project.json apps as hoisted Next projects", async () => {
-    const root = await fixtureRoot("clawpatch-map-next-nx-vite-");
+  it("does not treat project.json pages folders as hoisted Next projects", async () => {
+    const root = await fixtureRoot("clawpatch-map-next-nx-pages-");
     await writeFixture(
       root,
       "package.json",
@@ -367,7 +370,6 @@ describe("mapFeatures", () => {
       "apps/admin/project.json",
       JSON.stringify({ name: "admin", sourceRoot: "apps/admin/src" }, null, 2),
     );
-    await writeFixture(root, "apps/admin/vite.config.ts", "export default {};\n");
     await writeFixture(
       root,
       "apps/admin/src/pages/settings.tsx",
@@ -409,12 +411,12 @@ describe("mapFeatures", () => {
       "apps/admin/src/pages/About.tsx",
       "export default function About() { return null; }\n",
     );
-    await writeFixture(root, "apps/admin/vite.config.ts", "export default {};\n");
     await writeFixture(
       root,
       "apps/pagesapp/src/pages/about.tsx",
       "export default function About() { return null; }\n",
     );
+    await writeFixture(root, "apps/pagesapp/next.config.js", "module.exports = {};\n");
 
     const project = await detectProject(root);
     const result = await mapFeatures(root, project, []);

@@ -32,7 +32,8 @@ Supported deterministic mappers today:
 - selected root and workspace package scripts
 - Node/TypeScript workspace packages from `package.json` workspaces, `pnpm-workspace.yaml`, and common package folders
 - package-less Node/TypeScript app roots under monorepo folders such as
-  `apps/*` and `packages/*` when source files or framework config are present
+  `apps/*` and `packages/*` when source files or positive framework signals are
+  present
 - Nx project metadata from `project.json`, including project names, source roots, project types, and target names
 - Turborepo `turbo.json` metadata for workspace-aware validation commands and feature context
 - bounded Node/TypeScript source groups under `src/`, `lib/`, `app/`,
@@ -99,10 +100,12 @@ source, docs, and tests together as review context.
 
 In JavaScript/TypeScript monorepos, project discovery runs before framework
 mapping. Workspace packages, Nx projects, and package-less app roots with source
-or framework config signals are normalized into project roots, so framework
+or positive framework signals are normalized into project roots, so framework
 mappers can apply the same heuristics to `apps/*` and `packages/*` that they
-apply at the repository root. Feature tags include project name and project root
-metadata, enabling commands such as:
+apply at the repository root. Hoisted Next route mapping uses positive evidence
+such as local Next commands, local Next config, App Router files, or Pages API
+files instead of trying to enumerate every non-Next config file. Feature tags
+include project name and project root metadata, enabling commands such as:
 
 ```bash
 clawpatch review --project apps/web --limit 10

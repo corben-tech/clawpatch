@@ -151,17 +151,13 @@ async function hasRootNextProjectSignal(root: string, project: NodeProjectInfo):
   if (project.root === ".") {
     return false;
   }
-  if (project.projectJsonPath !== null) {
-    return (
-      !(await hasNonNextWebConfig(root, project)) && (await hasLiteralNextRoutes(root, project))
-    );
-  }
   if (hasNextCommandScript(project.packageJson?.scripts)) {
-    return (
-      !(await hasNonNextWebConfig(root, project)) && (await hasLiteralNextRoutes(root, project))
-    );
+    return hasLiteralNextRoutes(root, project);
   }
-  return project.packageJson === null && (await hasPackageLessNextRoutes(root, project));
+  if (project.packageJson === null || project.projectJsonPath !== null) {
+    return hasPackageLessNextRoutes(root, project);
+  }
+  return false;
 }
 
 function hasNextCommandScript(scripts: unknown): boolean {
@@ -203,9 +199,6 @@ async function hasAppRouterRoutes(root: string, project: NodeProjectInfo): Promi
 }
 
 async function hasPackageLessNextRoutes(root: string, project: NodeProjectInfo): Promise<boolean> {
-  if (await hasNonNextWebConfig(root, project)) {
-    return false;
-  }
   return (await hasAppRouterRoutes(root, project)) || (await hasPagesRouterSignal(root, project));
 }
 
@@ -249,22 +242,7 @@ function isPagesRouterPrefix(prefix: string): boolean {
 }
 
 function isPagesRouterSignalFile(file: string): boolean {
-  return nextRouteKind(file) === "pages";
-}
-
-async function hasNonNextWebConfig(root: string, project: NodeProjectInfo): Promise<boolean> {
-  for (const file of [
-    "vite.config.js",
-    "vite.config.mjs",
-    "vite.config.ts",
-    "astro.config.mjs",
-    "remix.config.js",
-  ]) {
-    if (await pathExists(join(root, packageRelativePath(project.root, file)))) {
-      return true;
-    }
-  }
-  return false;
+  return nextRouteKind(file) === "pages" && /^(?:src\/)?pages\/api\//u.test(file);
 }
 
 function projectRelativeRoutePath(project: NodeProjectInfo, file: string): string | null {

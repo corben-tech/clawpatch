@@ -754,7 +754,7 @@ async function hasHoistedNextRouteSignal(
   rootPackage: NodePackageJson | null,
   projectRoot: string,
 ): Promise<boolean> {
-  if (!hasNextDependency(rootPackage) || (await hasNonNextWebConfig(root, projectRoot))) {
+  if (!hasNextDependency(rootPackage)) {
     return false;
   }
   for (const routeRoot of ["app", "src/app", "pages", "src/pages"]) {
@@ -774,27 +774,12 @@ function hasNextDependency(pkg: NodePackageJson | null): boolean {
   );
 }
 
-async function hasNonNextWebConfig(root: string, projectRoot: string): Promise<boolean> {
-  for (const file of [
-    "vite.config.js",
-    "vite.config.mjs",
-    "vite.config.ts",
-    "astro.config.mjs",
-    "remix.config.js",
-  ]) {
-    if (await pathExists(join(root, packageRelativePath(projectRoot, file)))) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function isGenericNextRouteFile(projectRoot: string, file: string): boolean {
   const relativeFile = projectRoot === "." ? file : pathRelativeToPrefix(file, projectRoot);
   return (
     /^src\/app\/.+\/(?:page|route)\.[cm]?[jt]sx?$/iu.test(relativeFile) ||
     /^app\/.+\/(?:page|route)\.[cm]?[jt]sx?$/iu.test(relativeFile) ||
-    (/^(?:src\/)?pages\/.+\.[cm]?[jt]sx?$/iu.test(relativeFile) &&
+    (/^(?:src\/)?pages\/api\/.+\.[cm]?[jt]sx?$/iu.test(relativeFile) &&
       !/^(?:src\/)?pages\/_(?:app|document|error)\.[cm]?[jt]sx?$/iu.test(relativeFile))
   );
 }
