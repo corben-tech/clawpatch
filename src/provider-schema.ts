@@ -21,7 +21,9 @@ export const revalidateJsonSchema = providerJsonSchema(revalidateOutputSchema);
 export const fixPlanJsonSchema = providerJsonSchema(fixPlanOutputSchema);
 
 export function providerJsonSchema(schema: z.ZodType): object {
-  return stripProviderUnsupportedSchemaKeywords(z.toJSONSchema(schema)) as object;
+  return stripProviderUnsupportedSchemaKeywords(
+    z.toJSONSchema(schema, { io: "input", unrepresentable: "any" }),
+  ) as object;
 }
 
 function stripProviderUnsupportedSchemaKeywords(value: unknown): unknown {

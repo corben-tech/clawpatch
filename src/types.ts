@@ -208,8 +208,18 @@ export type TrustBoundary = FeatureRecord["trustBoundaries"][number];
 
 export const evidenceRefSchema = z.object({
   path: z.string(),
-  startLine: z.number().int().positive().nullable(),
-  endLine: z.number().int().positive().nullable(),
+  startLine: z
+    .number()
+    .int()
+    .min(0)
+    .nullable()
+    .transform((v) => (v === 0 ? null : v)),
+  endLine: z
+    .number()
+    .int()
+    .min(0)
+    .nullable()
+    .transform((v) => (v === 0 ? null : v)),
   symbol: z.string().nullable(),
   quote: z.string().nullable(),
 });
@@ -358,11 +368,17 @@ export const reviewOutputSchema = z.object({
       confidence: z.enum(["high", "medium", "low"]),
       evidence: z.array(evidenceRefSchema),
       reasoning: z.string(),
-      reproduction: z.string().nullable(),
+      reproduction: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? null),
       recommendation: z.string(),
       whyTestsDoNotAlreadyCoverThis: z.string(),
       suggestedRegressionTest: z.string().nullable(),
-      minimumFixScope: z.string(),
+      minimumFixScope: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? ""),
     }),
   ),
   inspected: z.object({
