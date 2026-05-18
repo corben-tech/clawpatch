@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildReviewPromptBundle } from "./prompt.js";
+import { REVIEW_PROMPT_FILE_CHAR_LIMIT, buildReviewPromptBundle } from "./prompt.js";
 import { defaultConfig } from "./config.js";
 import { fixtureRoot, writeFixture } from "./test-helpers.js";
 import type { FeatureRecord, ProjectRecord } from "./types.js";
@@ -36,6 +36,23 @@ describe("review prompt provenance", () => {
     ]);
     expect(bundle.manifest.promptBytes).toBeGreaterThan(0);
     expect(bundle.manifest.approximateTokens).toBeGreaterThan(0);
+  });
+
+  it("marks exact marker-length replacements as truncated", async () => {
+    const root = await fixtureRoot("clawpatch-prompt-truncated-edge-");
+    await writeFixture(root, "src/index.ts", "export const value = 1;\n");
+    await writeFixture(
+      root,
+      "docs/large.md",
+      `${"x".repeat(REVIEW_PROMPT_FILE_CHAR_LIMIT)}TAIL_ONLY_TOKEN`,
+    );
+    const bundle = await buildReviewPromptBundle(root, project(root), feature(), defaultConfig());
+
+    expect(bundle.manifest.includedFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "docs/large.md", truncated: true }),
+      ]),
+    );
   });
 });
 
