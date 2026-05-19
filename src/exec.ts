@@ -40,11 +40,19 @@ export async function runCommandRaw(
   });
   let spawnErrorMessage: string | null = null;
   const exitCodePromise = new Promise<number | null>((resolve) => {
+    let settled = false;
+    const finish = (code: number | null): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(code);
+    };
     child.on("error", (error: Error) => {
       spawnErrorMessage = error.message;
-      resolve(127);
+      finish(127);
     });
-    child.on("close", resolve);
+    child.on("close", finish);
   });
   endChildStdin(child, input);
   const exitCode = await exitCodePromise;
