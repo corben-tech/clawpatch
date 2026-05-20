@@ -17,7 +17,7 @@ import {
   parseFindingStatus,
 } from "./findings.js";
 import { nowIso, writeJson } from "./fs.js";
-import { changedFilesSince, discoverGit, findProjectRoot } from "./git.js";
+import { changedFilesSince, dirtyFiles, discoverGit, findProjectRoot } from "./git.js";
 import { stableId, runId } from "./id.js";
 import { mapWithSource } from "./agent-mapper.js";
 import { mapFeatures } from "./mapper.js";
@@ -276,7 +276,7 @@ export async function reviewCommand(
   const mode = reviewMode(flags);
   const customPrompt = await loadCustomReviewPrompt(flags);
   const features = await selectReviewFeatures(loaded, flags);
-  if (features.length === 0 && typeof flags["since"] === "string") {
+  if (features.length === 0 && hasFileFilter(flags)) {
     if (flags["dryRun"] === true) {
       return { next: "no features touched by diff" };
     }
@@ -945,7 +945,11 @@ export async function revalidateCommand(
     });
     throw error;
   }
-  if (flags["all"] === true || typeof flags["since"] === "string") {
+  if (
+    flags["all"] === true ||
+    typeof flags["since"] === "string" ||
+    flags["includeDirty"] === true
+  ) {
     return {
       revalidated: results.length,
       open: results.filter((result) => result.outcome === "open").length,
@@ -1402,6 +1406,9 @@ function reviewFlagSubset(
     if (value !== undefined) {
       subset[flag] = value;
     }
+  }
+  if (flags["includeDirty"] === true) {
+    subset["includeDirty"] = true;
   }
   return subset;
 }
@@ -1981,10 +1988,10 @@ async function filterFeaturesByFilesSince(
   flags: Record<string, string | boolean>,
 ): Promise<FeatureRecord[]> {
   const since = stringFlag(flags, "since");
-  if (since === undefined) {
+  if (since === undefined && flags["includeDirty"] !== true) {
     return features;
   }
-  const changed = await changedFilesSince(root, since);
+  const changed = await changedFiles(root, flags);
   return filterFeaturesByChangedFiles(features, changed, true);
 }
 
@@ -1994,12 +2001,35 @@ async function filterFindingsByOwnedFilesSince(
   flags: Record<string, string | boolean>,
 ): Promise<FindingRecord[]> {
   const since = stringFlag(flags, "since");
-  if (since === undefined) {
+  if (since === undefined && flags["includeDirty"] !== true) {
     return findings;
   }
-  const changed = await changedFilesSince(loaded.root, since);
+  const changed = await changedFiles(loaded.root, flags);
   const features = await readFeatures(loaded.paths);
   return filterFindingsByChangedOwnedFiles(findings, features, changed);
+}
+
+async function changedFiles(
+  root: string,
+  flags: Record<string, string | boolean>,
+): Promise<Set<string>> {
+  const changed = new Set<string>();
+  const since = stringFlag(flags, "since");
+  if (since !== undefined) {
+    for (const file of await changedFilesSince(root, since)) {
+      changed.add(file);
+    }
+  }
+  if (flags["includeDirty"] === true) {
+    for (const file of await dirtyFiles(root)) {
+      changed.add(file);
+    }
+  }
+  return changed;
+}
+
+function hasFileFilter(flags: Record<string, string | boolean>): boolean {
+  return stringFlag(flags, "since") !== undefined || flags["includeDirty"] === true;
 }
 
 function reviewJobs(flags: Record<string, string | boolean>): number {
