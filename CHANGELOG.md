@@ -5,6 +5,7 @@
 - Added `clawpatch ci` to initialize, map, review, write a report, and append a GitHub Actions step summary in one CI-friendly command.
 - Added `clawpatch open-pr --patch <id>` to turn an applied patch attempt into an explicit GitHub pull request.
 - Added review prompt provenance and budget accounting for included files, omitted files, prompt bytes, and approximate tokens.
+- Added retries for transient acpx JSON review failures via `--prompt-retries` and `CLAWPATCH_REVIEW_RETRIES`, thanks @coletebou.
 - Hardened review ingestion so provider findings must cite included files with valid line ranges and matching evidence quotes.
 - Fixed `clawpatch open-pr` so repositories without default-branch metadata use a dedicated patch branch and let GitHub choose the PR base.
 - Fixed `clawpatch open-pr` retries to push the recorded patch commit instead of any later local branch tip.
