@@ -762,7 +762,7 @@ function endOfObject(source: string, start: number): number | null {
 }
 
 function endOfArray(source: string, start: number): number | null {
-  let depth = 1;
+  const stack = ["["];
   let quote: string | null = null;
   let escaped = false;
   for (let index = start; index < source.length; index += 1) {
@@ -782,12 +782,21 @@ function endOfArray(source: string, start: number): number | null {
     }
     if (char === "'" || char === '"' || char === "`") {
       quote = char;
-    } else if (char === "[") {
-      depth += 1;
-    } else if (char === "]") {
-      depth -= 1;
-      if (depth === 0) {
-        return index + 1;
+    } else if (char === "[" || char === "(" || char === "{") {
+      stack.push(char);
+    } else if (char === "]" || char === ")" || char === "}") {
+      const opener = stack.at(-1);
+      if (
+        (opener === "[" && char === "]") ||
+        (opener === "(" && char === ")") ||
+        (opener === "{" && char === "}")
+      ) {
+        stack.pop();
+        if (stack.length === 0) {
+          return index + 1;
+        }
+      } else {
+        return null;
       }
     }
   }
