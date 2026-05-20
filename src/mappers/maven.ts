@@ -276,8 +276,6 @@ function mavenModulePath(moduleRoot: string, modulePath: string): string | null 
   if (
     normalizedModulePath.length === 0 ||
     normalizedModulePath === "." ||
-    normalizedModulePath === ".." ||
-    normalizedModulePath.startsWith("../") ||
     /^(?:[A-Za-z]:)?\//u.test(normalizedModulePath)
   ) {
     return null;

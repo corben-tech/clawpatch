@@ -9686,7 +9686,7 @@ describe("mapFeatures", () => {
         "  <packaging>pom</packaging>",
         "  <modules>",
         "    <module>core</module>",
-        "    <module>services/api</module>",
+        "    <module>services</module>",
         "  </modules>",
         "</project>",
         "",
@@ -9715,6 +9715,27 @@ describe("mapFeatures", () => {
     );
     await writeFixture(
       root,
+      "services/pom.xml",
+      [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <parent>",
+        "    <groupId>com.acme</groupId>",
+        "    <artifactId>root-parent</artifactId>",
+        "    <version>1.0.0</version>",
+        "  </parent>",
+        "  <artifactId>services-parent</artifactId>",
+        "  <packaging>pom</packaging>",
+        "  <modules>",
+        "    <module>api</module>",
+        "    <module>../shared</module>",
+        "  </modules>",
+        "</project>",
+        "",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
       "services/api/pom.xml",
       [
         "<project>",
@@ -9734,6 +9755,27 @@ describe("mapFeatures", () => {
       "services/api/src/main/java/com/acme/api/Api.java",
       "package com.acme.api;\nclass Api {}\n",
     );
+    await writeFixture(
+      root,
+      "shared/pom.xml",
+      [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <parent>",
+        "    <groupId>com.acme</groupId>",
+        "    <artifactId>root-parent</artifactId>",
+        "    <version>1.0.0</version>",
+        "  </parent>",
+        "  <artifactId>shared-library</artifactId>",
+        "</project>",
+        "",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "shared/src/main/java/com/acme/shared/Shared.java",
+      "package com.acme.shared;\nclass Shared {}\n",
+    );
 
     const project = await detectProject(root);
     const result = await mapFeatures(root, project, []);
@@ -9742,11 +9784,15 @@ describe("mapFeatures", () => {
 
     expect(project.detected.packageManagers).toContain("maven");
     expect(titles).toContain("Maven module root-parent");
+    expect(titles).toContain("Maven module services-parent");
     expect(titles).toContain("Maven module core-service");
     expect(titles).toContain("Maven module api-service");
+    expect(titles).toContain("Maven module shared-library");
     expect(titles).toContain("Maven source core/src");
     expect(titles).toContain("Maven source services/api/src");
+    expect(titles).toContain("Maven source shared/src");
     expect(titles).not.toContain("Maven source src");
+    expect(titles).not.toContain("Maven source services/src");
     expect(core?.tags).toEqual(
       expect.arrayContaining(["project:core-service", "project-root:core"]),
     );
