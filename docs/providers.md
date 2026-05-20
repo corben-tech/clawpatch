@@ -229,10 +229,15 @@ How the Cursor provider works:
 - Model names: pass Cursor model ids, for example `composer-2.5` for Composer
   2.5 without fast mode
 - Reasoning effort and `skipGitRepoCheck`: not mapped to Cursor CLI flags
-- Authentication: experimental execution uses the host user environment, so
-  either `CURSOR_API_KEY` or the user's existing Cursor login/keychain state can
-  be used. Clawpatch also sets `NO_OPEN_BROWSER=1` to reduce browser prompts
-  during headless runs.
+- Authentication: experimental execution uses the host user environment and
+  passes `CURSOR_API_KEY` through when present. Prefer API-key auth for headless
+  runs; relying on the user's Cursor login can touch the macOS login keychain.
+  Clawpatch also sets `NO_OPEN_BROWSER=1` to reduce browser prompts during
+  headless runs.
+- Read-only guard: map, review, and revalidate pass `--mode ask` and include
+  read-only instructions in the prompt. Clawpatch does not set
+  `CURSOR_CONFIG_DIR`, because that can bypass the user's existing Cursor auth
+  profile and trigger browser login prompts.
 - Timeout: 300 seconds by default, override with
   `CLAWPATCH_CURSOR_TIMEOUT_MS` or `CLAWPATCH_PROVIDER_TIMEOUT_MS`
 - Advisory handling: semver-like Cursor versions below `2.5.0` are blocked for

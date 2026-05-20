@@ -340,8 +340,9 @@ Cursor evidence rules:
 - Cite only files that are explicitly included in the prompt's file blocks.
 - evidence.path must exactly match an included file path.
 - If you provide startLine and endLine, copy them from the included file block and keep them inside that file's shown line range.
-- Prefer "quote": null. Include a quote only when you copied it exactly from the included file contents.
-- If you are unsure about an evidence quote or line range, set quote, startLine, and endLine to null instead of guessing.`
+- Do not use files outside the prompt excerpts as evidence.
+- Always set evidence.quote to null.
+- If you are unsure about an evidence line range, set startLine and endLine to null instead of guessing.`
       : "";
   return `${promptBody}${evidenceRules}
 
@@ -476,8 +477,10 @@ function cursorTimeoutMs(): number {
 }
 
 function cursorEnv(): NodeJS.ProcessEnv {
+  const apiKey = process.env["CURSOR_API_KEY"];
   return {
     NO_OPEN_BROWSER: "1",
+    ...(apiKey === undefined ? {} : { CURSOR_API_KEY: apiKey }),
   };
 }
 
@@ -796,7 +799,10 @@ function firstPromptFileWith(prompt: string, marker: string): string | null {
     if (newline === -1) {
       continue;
     }
-    const path = block.slice(0, newline).trim();
+    const path = block
+      .slice(0, newline)
+      .replace(/ \([^)]*\)$/u, "")
+      .trim();
     const contents = block.slice(newline + 1);
     if (path.length > 0 && contents.includes(marker)) {
       return path;

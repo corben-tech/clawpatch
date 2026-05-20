@@ -38,6 +38,25 @@ describe("validateReviewOutput", () => {
     ).resolves.toMatchObject({ findings: [{ title: "Bug" }] });
   });
 
+  it("accepts evidence from linked tests included in review context", async () => {
+    const root = await fixtureRoot("clawpatch-review-validation-test-file-");
+    await writeFixture(root, "src/index.ts", "const value = 'safe';\n");
+    await writeFixture(root, "src/index.test.ts", "const value = 'TODO_BUG';\n");
+
+    await expect(
+      validateReviewOutput(
+        root,
+        {
+          ...feature("src/index.ts"),
+          tests: [{ path: "src/index.test.ts", command: null }],
+        },
+        defaultConfig(),
+        manifest("src/index.test.ts", { role: "test" }),
+        output("src/index.test.ts"),
+      ),
+    ).resolves.toMatchObject({ findings: [{ title: "Bug" }] });
+  });
+
   it("rejects evidence for files that were not included in review context", async () => {
     const root = await fixtureRoot("clawpatch-review-validation-path-");
     await writeFixture(root, "src/index.ts", "const value = 'TODO_BUG';\n");
@@ -104,6 +123,23 @@ describe("validateReviewOutput", () => {
     ).rejects.toMatchObject({ code: "malformed-output" });
   });
 
+  it("rejects line-only evidence outside the included prompt range", async () => {
+    const root = await fixtureRoot("clawpatch-review-validation-prompt-range-");
+    await writeFixture(root, "src/index.ts", "const first = 'safe';\nconst second = 'TODO_BUG';\n");
+
+    await expect(
+      validateReviewOutput(
+        root,
+        feature("src/index.ts"),
+        defaultConfig(),
+        manifest("src/index.ts", {
+          includedLineRanges: [{ startLine: 1, endLine: 1 }],
+        }),
+        output("src/index.ts", { startLine: 2, endLine: 2, quote: null }),
+      ),
+    ).rejects.toMatchObject({ code: "malformed-output" });
+  });
+
   it("rejects evidence that only exists beyond the truncated prompt text", async () => {
     const root = await fixtureRoot("clawpatch-review-validation-truncated-");
     await writeFixture(root, "src/index.ts", `${"a".repeat(24_000)}\nconst value = 'TODO_TAIL';\n`);
@@ -147,7 +183,11 @@ function feature(path: string): FeatureRecord {
 
 function output(
   path: string,
-  evidence: { startLine?: number | null; endLine?: number | null; quote?: string | null } = {},
+  evidence: {
+    startLine?: number | null;
+    endLine?: number | null;
+    quote?: string | null;
+  } = {},
 ): ReviewOutput {
   return {
     findings: [
@@ -179,18 +219,29 @@ function output(
 
 function manifest(
   path: string,
-  options: { truncated?: boolean; readable?: boolean } = {},
+  options: {
+    truncated?: boolean;
+    readable?: boolean;
+    includedLineRanges?: Array<{ startLine: number; endLine: number }>;
+    role?: "owned" | "context" | "test";
+  } = {},
 ): ReviewPromptManifest {
   const readable = options.readable ?? true;
+  const includedLineRanges = readable
+    ? (options.includedLineRanges ?? [{ startLine: 1, endLine: 1 }])
+    : [];
   return {
     maxOwnedFiles: defaultConfig().review.maxOwnedFiles,
     maxContextFiles: defaultConfig().review.maxContextFiles,
     includedFiles: [
       {
         path,
-        role: "owned",
+        role: options.role ?? "owned",
         bytes: readable ? 1 : 0,
         includedBytes: readable ? 1 : 0,
+        includedStartLine: includedLineRanges[0]?.startLine ?? null,
+        includedEndLine: includedLineRanges.at(-1)?.endLine ?? null,
+        includedLineRanges,
         truncated: options.truncated ?? false,
         readable,
         skippedReason: readable ? null : "unreadable",

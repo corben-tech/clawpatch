@@ -21,13 +21,32 @@ describe("review prompt provenance", () => {
     });
 
     expect(bundle.prompt).toContain("Prompt context:");
-    expect(bundle.prompt).toContain("--- src/index.ts");
-    expect(bundle.prompt).toContain("--- tests/index.test.ts");
+    expect(bundle.prompt).toContain("--- src/index.ts (owned, lines 1-1)");
+    expect(bundle.prompt).toContain("1 | export const value = 1;");
+    expect(bundle.prompt).toContain("--- tests/index.test.ts (context, lines 1-1)");
     expect(bundle.prompt).not.toContain("--- src/extra.ts");
+    expect(bundle.prompt).toContain("Valid evidence paths are exactly:");
+    expect(bundle.prompt).toContain("- src/index.ts");
+    expect(bundle.prompt).toContain("- tests/index.test.ts");
+    expect(bundle.prompt).not.toContain("- src/extra.ts");
+    expect(bundle.prompt).not.toContain('"analysisHistory"');
+    expect(bundle.prompt).not.toContain('"lock"');
     expect(bundle.manifest.includedFiles).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ path: "src/index.ts", role: "owned", truncated: false }),
-        expect.objectContaining({ path: "docs/large.md", role: "context", truncated: true }),
+        expect.objectContaining({
+          path: "src/index.ts",
+          role: "owned",
+          includedStartLine: 1,
+          includedEndLine: 1,
+          truncated: false,
+        }),
+        expect.objectContaining({
+          path: "docs/large.md",
+          role: "context",
+          includedStartLine: 1,
+          includedEndLine: expect.any(Number),
+          truncated: true,
+        }),
       ]),
     );
     expect(bundle.manifest.omittedFiles).toEqual([
@@ -50,6 +69,36 @@ describe("review prompt provenance", () => {
 
     expect(bundle.manifest.includedFiles).toEqual(
       expect.arrayContaining([expect.objectContaining({ path: "docs/large.md", truncated: true })]),
+    );
+    expect(bundle.prompt).toContain("--- docs/large.md (context, lines 1-1, truncated)");
+    expect(bundle.prompt).toContain("...[truncated after line 1]");
+  });
+
+  it("includes linked tests as valid review evidence", async () => {
+    const root = await fixtureRoot("clawpatch-prompt-linked-tests-");
+    await writeFixture(root, "src/index.ts", "export const value = 1;\n");
+    await writeFixture(root, "src/extra.ts", "export const extra = 1;\n");
+    await writeFixture(root, "tests/index.test.ts", "expect(1).toBe(1);\n");
+    await writeFixture(root, "docs/large.md", "docs\n");
+    const linkedTestFeature = {
+      ...feature(),
+      contextFiles: [],
+      tests: [{ path: "tests/index.test.ts", command: null }],
+    };
+
+    const bundle = await buildReviewPromptBundle(
+      root,
+      project(root),
+      linkedTestFeature,
+      defaultConfig(),
+    );
+
+    expect(bundle.prompt).toContain("--- tests/index.test.ts (test, lines 1-1)");
+    expect(bundle.prompt).toContain("- tests/index.test.ts");
+    expect(bundle.manifest.includedFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "tests/index.test.ts", role: "test" }),
+      ]),
     );
   });
 });

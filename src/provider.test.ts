@@ -432,9 +432,36 @@ describe("Cursor provider", () => {
   });
 
   it("sets Cursor headless browser suppression without replacing the host environment", () => {
-    expect(cursorEnv()).toEqual({
-      NO_OPEN_BROWSER: "1",
-    });
+    const previous = process.env["CURSOR_API_KEY"];
+    try {
+      delete process.env["CURSOR_API_KEY"];
+      expect(cursorEnv()).toEqual({
+        NO_OPEN_BROWSER: "1",
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env["CURSOR_API_KEY"];
+      } else {
+        process.env["CURSOR_API_KEY"] = previous;
+      }
+    }
+  });
+
+  it("passes CURSOR_API_KEY through the explicit Cursor env overlay when present", () => {
+    const previous = process.env["CURSOR_API_KEY"];
+    try {
+      process.env["CURSOR_API_KEY"] = "cursor_test_key";
+      expect(cursorEnv()).toEqual({
+        NO_OPEN_BROWSER: "1",
+        CURSOR_API_KEY: "cursor_test_key",
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env["CURSOR_API_KEY"];
+      } else {
+        process.env["CURSOR_API_KEY"] = previous;
+      }
+    }
   });
 
   it("uses a 300 second default timeout for Cursor", () => {
@@ -448,8 +475,9 @@ describe("Cursor provider", () => {
     const prompt = cursorPrompt("base review prompt", reviewJsonSchema, true);
 
     expect(prompt).toContain("Cursor evidence rules:");
-    expect(prompt).toContain('Prefer "quote": null');
+    expect(prompt).toContain("Always set evidence.quote to null");
     expect(prompt).toContain("evidence.path must exactly match an included file path");
+    expect(prompt).toContain("Do not use files outside the prompt excerpts as evidence");
   });
 
   it("does not add review evidence guidance to Cursor map prompts", () => {
