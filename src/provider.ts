@@ -744,7 +744,7 @@ function buildAcpxJsonArgs(
   const permFlag = permission === "read" ? "--approve-reads" : "--approve-all";
   const args = ["--cwd", root, permFlag, "--format", "json", "--json-strict", "--suppress-reads"];
   const promptRetries = acpxPromptRetries();
-  if (promptRetries > 0) {
+  if (permission === "read" && promptRetries > 0) {
     args.push("--prompt-retries", String(promptRetries));
   }
   if (agentModel !== null) {

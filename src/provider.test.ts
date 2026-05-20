@@ -652,11 +652,19 @@ describe("buildAcpxJsonArgs", () => {
 
   it("honors CLAWPATCH_ACPX_PROMPT_RETRIES env override", () => {
     withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "4", () => {
-      const args = buildAcpxJsonArgs("/tmp/repo", null, "approve");
+      const args = buildAcpxJsonArgs("/tmp/repo", null, "read");
       const idx = args.indexOf("--prompt-retries");
       expect(idx).toBeGreaterThanOrEqual(0);
       expect(args[idx + 1]).toBe("4");
+      expect(args).toContain("--approve-reads");
+    });
+  });
+
+  it("omits --prompt-retries for approve mode", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "4", () => {
+      const args = buildAcpxJsonArgs("/tmp/repo", null, "approve");
       expect(args).toContain("--approve-all");
+      expect(args).not.toContain("--prompt-retries");
     });
   });
 
