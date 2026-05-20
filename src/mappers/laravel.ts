@@ -405,14 +405,15 @@ async function laravelRoutes(root: string): Promise<RouteRef[]> {
   for (const file of routeFiles) {
     const source = stripPhpComments(await readFile(join(root, file), "utf8"));
     const imports = phpUseMap(source);
+    const filePrefixes = fileDefaultRoutePrefixes(file);
     for (const statement of routeStatements(source)) {
       const calls = parseRouteCalls(statement);
-      const route = routeFromCalls(file, imports, calls, fileDefaultRoutePrefixes(file));
+      const route = routeFromCalls(file, imports, calls, filePrefixes);
       if (route !== null) {
         routes.push(route);
       }
-      routes.push(...routeGroupRoutes(file, imports, calls));
-      routes.push(...controllerGroupRoutes(file, imports, calls));
+      routes.push(...routeGroupRoutes(file, imports, calls, filePrefixes));
+      routes.push(...controllerGroupRoutes(file, imports, calls, filePrefixes));
     }
   }
   return routes;
@@ -422,6 +423,7 @@ function routeGroupRoutes(
   file: string,
   imports: Map<string, string>,
   calls: RouteCall[],
+  basePrefixes: string[],
 ): RouteRef[] {
   const routes: RouteRef[] = [];
   const groupIndex = calls.findIndex((call) => call.name === "group");
@@ -438,15 +440,18 @@ function routeGroupRoutes(
     return routes;
   }
   const groupPrefixes = [
-    ...fileDefaultRoutePrefixes(file),
+    ...basePrefixes,
     ...routePrefixesFromCalls(calls.slice(0, groupIndex)),
     ...groupAttributePrefixes,
   ];
   for (const statement of routeStatements(body)) {
-    const route = routeFromCalls(file, imports, parseRouteCalls(statement), groupPrefixes);
+    const nestedCalls = parseRouteCalls(statement);
+    const route = routeFromCalls(file, imports, nestedCalls, groupPrefixes);
     if (route !== null) {
       routes.push(route);
     }
+    routes.push(...routeGroupRoutes(file, imports, nestedCalls, groupPrefixes));
+    routes.push(...controllerGroupRoutes(file, imports, nestedCalls, groupPrefixes));
   }
   return routes;
 }
@@ -455,6 +460,7 @@ function controllerGroupRoutes(
   file: string,
   imports: Map<string, string>,
   calls: RouteCall[],
+  basePrefixes: string[],
 ): RouteRef[] {
   const routes: RouteRef[] = [];
   const controllerIndex = calls.findIndex((call) => call.name === "controller");
@@ -470,10 +476,7 @@ function controllerGroupRoutes(
   if (controllerClass === null || body === null) {
     return routes;
   }
-  const groupPrefixes = [
-    ...fileDefaultRoutePrefixes(file),
-    ...routePrefixesFromCalls(calls.slice(0, groupIndex)),
-  ];
+  const groupPrefixes = [...basePrefixes, ...routePrefixesFromCalls(calls.slice(0, groupIndex))];
   for (const statement of routeStatements(body)) {
     const route = routeFromCalls(
       file,
