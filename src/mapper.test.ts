@@ -9691,6 +9691,39 @@ describe("mapFeatures", () => {
     );
   });
 
+  it("ignores Maven metadata inside XML comments", async () => {
+    const root = await fixtureRoot("clawpatch-maven-xml-comments-");
+    await writeFixture(
+      root,
+      "pom.xml",
+      [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <groupId>com.acme</groupId>",
+        "  <artifactId>commented-app</artifactId>",
+        "  <version>1.0.0</version>",
+        "  <!-- <modules><module>ghost</module></modules> -->",
+        "  <!-- <dependencies><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency></dependencies> -->",
+        "</project>",
+        "",
+      ].join("\n"),
+    );
+    await writeFixture(
+      root,
+      "src/main/java/com/acme/App.java",
+      "package com.acme;\nclass App {}\n",
+    );
+
+    const project = await detectProject(root);
+    const result = await mapFeatures(root, project, []);
+    const titles = result.features.map((feature) => feature.title);
+
+    expect(project.detected.frameworks).not.toContain("spring");
+    expect(project.detected.frameworks).not.toContain("spring-boot");
+    expect(titles).toContain("Maven module commented-app");
+    expect(titles).not.toContain("Maven module ghost");
+  });
+
   it("maps Maven multi-module projects without empty parent source groups", async () => {
     const root = await fixtureRoot("clawpatch-maven-multimodule-map-");
     await writeFixture(
