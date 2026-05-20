@@ -2877,9 +2877,12 @@ describe("mapFeatures", () => {
         "const router = Router();",
         "const nestedRouter = Router();",
         "const middlewareRouter = Router();",
+        "const genericMiddlewareRouter = Router();",
+        "const asyncMiddlewareRouter = Router();",
         "const pathlessRouter = Router();",
         "const directPathlessRouter = Router();",
         "const arrayRouter = Router();",
+        "const wildcardRouter = Router();",
         "const dynamicRouter = Router();",
         "const dynamicParent = Router();",
         "const dynamicChild = Router();",
@@ -2891,9 +2894,12 @@ describe("mapFeatures", () => {
         "app.use('/service', apiApp);",
         "router.use('/v1', nestedRouter);",
         "app.use('/middleware', requireAuth, middlewareRouter);",
+        "apiApp.use(mw, genericMiddlewareRouter);",
+        "apiApp.use(amw, asyncMiddlewareRouter);",
         "apiApp.use(requireAuth, pathlessRouter);",
         "apiApp.use(directPathlessRouter);",
         "app.use(['/array', '/alt-array'], arrayRouter);",
+        "app.use('*', wildcardRouter);",
         "app.use(dynamicPrefix, dynamicRouter);",
         "app.use(dynamicBase, dynamicParent);",
         "dynamicParent.use('/v1', dynamicChild);",
@@ -2904,9 +2910,12 @@ describe("mapFeatures", () => {
         "nestedRouter.post('/teams', createTeam);",
         "apiApp.delete('/sessions/:id', deleteSession);",
         "middlewareRouter.get('/users', listMiddlewareUsers);",
+        "genericMiddlewareRouter.get('/generic-middleware-users', listGenericMiddlewareUsers);",
+        "asyncMiddlewareRouter.get('/async-middleware-users', listAsyncMiddlewareUsers);",
         "pathlessRouter.get('/pathless-users', listPathlessUsers);",
         "directPathlessRouter.get('/direct-pathless-users', listDirectPathlessUsers);",
         "arrayRouter.get('/array-users', listArrayUsers);",
+        "wildcardRouter.get('/wildcard-users', listWildcardUsers);",
         "dynamicRouter.get('/dynamic-users', dynamicUsers);",
         'dynamicChild.get("/dynamic-child-users", dynamicChildUsers);',
         'tenantRouter.get("/tenant-users", tenantUsers);',
@@ -2917,10 +2926,15 @@ describe("mapFeatures", () => {
         "function createTeam() {}",
         "function deleteSession() {}",
         "function requireAuth() {}",
+        "function mw() {}",
+        "async function amw() {}",
         "function listMiddlewareUsers() {}",
+        "function listGenericMiddlewareUsers() {}",
+        "function listAsyncMiddlewareUsers() {}",
         "function listPathlessUsers() {}",
         "function listDirectPathlessUsers() {}",
         "function listArrayUsers() {}",
+        "function listWildcardUsers() {}",
         "function dynamicUsers() {}",
         "function dynamicChildUsers() {}",
         "function tenantUsers() {}",
@@ -2956,6 +2970,21 @@ describe("mapFeatures", () => {
         "",
       ].join("\n"),
     );
+    await writeFixture(
+      root,
+      "src/express-dynamic-mw.ts",
+      [
+        "import express, { Router } from 'express';",
+        "",
+        "const app = express();",
+        "const router = Router();",
+        "const mw = dynamicPrefix;",
+        "app.use(mw, router);",
+        "router.get('/dynamic-mw-users', listDynamicMwUsers);",
+        "function listDynamicMwUsers() {}",
+        "",
+      ].join("\n"),
+    );
 
     const project = await detectProject(root);
     const result = await mapFeatures(root, project, []);
@@ -2968,10 +2997,13 @@ describe("mapFeatures", () => {
         "Express route POST /api/v1/teams",
         "Express route DELETE /service/sessions/:id",
         "Express route GET /middleware/users",
+        "Express route GET /service/generic-middleware-users",
+        "Express route GET /service/async-middleware-users",
         "Express route GET /service/pathless-users",
         "Express route GET /service/direct-pathless-users",
         "Express route GET /array/array-users",
         "Express route GET /alt-array/array-users",
+        "Express route GET /*/wildcard-users",
         "Hono route GET /api/users",
         "Hono route DELETE /api/v1/sessions/:id",
       ]),
@@ -2981,11 +3013,15 @@ describe("mapFeatures", () => {
     expect(titles).not.toContain("Express route POST /v1/teams");
     expect(titles).not.toContain("Express route DELETE /sessions/:id");
     expect(titles).not.toContain("Express route GET /false/false-users");
+    expect(titles).not.toContain("Express route GET /generic-middleware-users");
+    expect(titles).not.toContain("Express route GET /async-middleware-users");
     expect(titles).not.toContain("Express route GET /pathless-users");
     expect(titles).not.toContain("Express route GET /direct-pathless-users");
     expect(titles).not.toContain("Express route GET /array-users");
+    expect(titles).not.toContain("Express route GET /wildcard-users");
     expect(titles).not.toContain("Express route GET /dynamic-users");
     expect(titles).not.toContain("Express route GET /dynamic-child-users");
+    expect(titles).not.toContain("Express route GET /dynamic-mw-users");
     expect(titles).not.toContain("Express route GET /tenant-users");
     expect(titles).not.toContain("Express route GET /v1/dynamic-child-users");
     expect(titles).not.toContain("Hono route GET /users");

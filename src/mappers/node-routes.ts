@@ -375,7 +375,7 @@ function mountedTargets(
           : singletonMountPrefix(args[0]);
     const pathlessExpressMount =
       method === "use" &&
-      (isPathlessExpressMount(args) || isSingleExpressChildMount(args, parent, targets));
+      (isPathlessExpressMount(source, args) || isSingleExpressChildMount(args, parent, targets));
     const prefixes = literalPrefixes ?? (pathlessExpressMount ? ["/"] : null);
     if (prefixes === null || !prefixes.every(isMountPrefix)) {
       const childArgs = method === "use" ? args.slice(1) : args.slice(1, 2);
@@ -470,12 +470,12 @@ function isSingleExpressChildMount(
   return child !== undefined && isSimpleIdentifier(child) && child !== parent && targets.has(child);
 }
 
-function isPathlessExpressMount(args: string[]): boolean {
+function isPathlessExpressMount(source: string, args: string[]): boolean {
   const first = args[0]?.trim();
   if (first === undefined || standaloneStringLiteral(first) !== null) {
     return false;
   }
-  return isLikelyExpressMiddleware(first);
+  return isLikelyExpressMiddleware(first) || isDeclaredFunctionLike(source, first);
 }
 
 function isLikelyExpressMiddleware(value: string): boolean {
@@ -485,6 +485,29 @@ function isLikelyExpressMiddleware(value: string): boolean {
       value,
     )
   );
+}
+
+function isDeclaredFunctionLike(source: string, name: string): boolean {
+  if (!isSimpleIdentifier(name)) {
+    return false;
+  }
+  const escapedName = escapeRegExp(name);
+  const patterns = [
+    new RegExp(`\\b(?:async\\s+)?function\\s+${escapedName}\\s*\\(`, "gu"),
+    new RegExp(
+      `${declarationPrefix.replace("([A-Za-z_$][A-Za-z0-9_$]*)", escapedName)}(?:async\\s*)?(?:function\\b|\\([^)]*\\)\\s*=>|[A-Za-z_$][A-Za-z0-9_$]*\\s*=>)`,
+      "gu",
+    ),
+  ];
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      if (!isInsideCommentOrString(source, match.index ?? 0)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function routePathsForTarget(
@@ -544,7 +567,7 @@ function standaloneStringLiteral(source: string): string | null {
 }
 
 function isMountPrefix(path: string): boolean {
-  return path.startsWith("/");
+  return path === "*" || path.startsWith("/");
 }
 
 function isSimpleIdentifier(value: string): boolean {
@@ -552,7 +575,7 @@ function isSimpleIdentifier(value: string): boolean {
 }
 
 function joinRoutePaths(prefix: string, routePath: string): string {
-  const normalizedPrefix = prefix.replace(/\/+$/u, "") || "/";
+  const normalizedPrefix = prefix === "*" ? "/*" : prefix.replace(/\/+$/u, "") || "/";
   if (normalizedPrefix === "/") {
     return routePath;
   }
