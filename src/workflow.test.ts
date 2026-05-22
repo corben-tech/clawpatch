@@ -333,6 +333,8 @@ describe("workflow", () => {
         "2",
         "--jobs",
         "1",
+        "--rate-limit-per-minute",
+        "30",
         "--output",
         "report.md",
       ]).flags,
@@ -340,6 +342,7 @@ describe("workflow", () => {
       since: "origin/main",
       limit: "2",
       jobs: "1",
+      rateLimitPerMinute: "30",
       output: "report.md",
     });
     expect(parseArgs(["ci", "--include-dirty"]).flags).toMatchObject({

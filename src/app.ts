@@ -1413,7 +1413,7 @@ function reviewFlagSubset(
   flags: Record<string, string | boolean>,
 ): Record<string, string | boolean> {
   const subset = providerFlagSubset(flags);
-  for (const flag of ["since", "limit", "jobs"] as const) {
+  for (const flag of ["since", "limit", "jobs", "rateLimitPerMinute"] as const) {
     const value = stringFlag(flags, flag);
     if (value !== undefined) {
       subset[flag] = value;

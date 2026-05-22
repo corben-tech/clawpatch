@@ -175,6 +175,7 @@ const commandFlags = {
     "limit",
     "since",
     "jobs",
+    "rateLimitPerMinute",
     "provider",
     "model",
     "reasoningEffort",
@@ -466,6 +467,7 @@ Flags:
   --include-dirty
   --limit <n>
   --jobs <n>        default: ~half of CPU cores, max 10
+  --rate-limit-per-minute <n>   cap provider calls per 60s window (env: CLAWPATCH_RPM)
   --provider <name>
   --model <name>
   --reasoning-effort <none|minimal|low|medium|high|xhigh>
