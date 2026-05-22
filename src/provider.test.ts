@@ -546,6 +546,30 @@ describe("Claude provider helpers", () => {
     expect(claudeExitCode(stdout, "", 1)).toBe(4);
   });
 
+  it("classifies Claude print-mode API status envelopes", () => {
+    const auth = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      api_error_status: 401,
+      result: "SOURCE_CONTEXT_SECRET",
+    });
+    const quota = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      api_error_status: 429,
+      result: "SOURCE_CONTEXT_SECRET",
+    });
+
+    expect(claudeFailureMessage(auth, "", 1)).toBe("claude provider auth/config failed");
+    expect(claudeExitCode(auth, "", 1)).toBe(4);
+    expect(claudeFailureMessage(quota, "", 1)).toBe("claude provider quota/rate-limit failed");
+    expect(claudeExitCode(quota, "", 1)).toBe(5);
+    expect(claudeFailureMessage(auth, "", 1)).not.toContain("SOURCE_CONTEXT_SECRET");
+    expect(claudeFailureMessage(quota, "", 1)).not.toContain("SOURCE_CONTEXT_SECRET");
+  });
+
   it("omits Claude error.message from stdout failure signals", () => {
     const stdout = JSON.stringify({
       type: "result",

@@ -789,10 +789,14 @@ function claudeFailureMessage(stdout: string, stderr: string, exitCode: number |
     return "claude provider timed out";
   }
   const combined = `${stderr}\n${claudeFailureSignal(stdout)}`;
-  if (/auth|login|api key|unauthorized|authentication|oauth|not authenticated/iu.test(combined)) {
+  if (
+    /auth|login|api key|unauthorized|authentication|oauth|not authenticated|api_error_status=(?:401|403)\b/iu.test(
+      combined,
+    )
+  ) {
     return "claude provider auth/config failed";
   }
-  if (/quota|rate.?limit|billing|credit/iu.test(combined)) {
+  if (/quota|rate.?limit|billing|credit|api_error_status=(?:402|429)\b/iu.test(combined)) {
     return "claude provider quota/rate-limit failed";
   }
   const signal = claudeFailureSignal(stdout);
@@ -801,10 +805,14 @@ function claudeFailureMessage(stdout: string, stderr: string, exitCode: number |
 
 function claudeExitCode(stdout: string, stderr: string, exitCode: number | null): number {
   const combined = `${stderr}\n${claudeFailureSignal(stdout)}`;
-  if (/auth|login|api key|unauthorized|authentication|oauth|not authenticated/iu.test(combined)) {
+  if (
+    /auth|login|api key|unauthorized|authentication|oauth|not authenticated|api_error_status=(?:401|403)\b/iu.test(
+      combined,
+    )
+  ) {
     return 4;
   }
-  if (/quota|rate.?limit|billing|credit/iu.test(combined)) {
+  if (/quota|rate.?limit|billing|credit|api_error_status=(?:402|429)\b/iu.test(combined)) {
     return 5;
   }
   if (exitCode === 124 || /timed out/iu.test(combined)) {
