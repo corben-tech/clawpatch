@@ -5,16 +5,38 @@
 - Added `clawpatch ci` to initialize, map, review, write a report, and append a GitHub Actions step summary in one CI-friendly command.
 - Added `clawpatch open-pr --patch <id>` to turn an applied patch attempt into an explicit GitHub pull request.
 - Added review prompt provenance and budget accounting for included files, omitted files, prompt bytes, and approximate tokens.
+- Added retries for transient acpx JSON review failures via `--prompt-retries` and `CLAWPATCH_REVIEW_RETRIES`, thanks @coletebou.
 - Hardened review ingestion so provider findings must cite included files with valid line ranges and matching evidence quotes.
+- Fixed provider review to preserve valid sibling findings when per-finding schema or evidence validation fails, recording drops in `run.errors` as non-fatal `schema-drop` or `validation-drop` entries, thanks @coletebou.
+- Improved provider schema validation failures so `run.errors[].message` shows compact one-line Zod issue summaries, thanks @coletebou.
+- Added `total` and `results` aliases on `clawpatch report --json` output while keeping the legacy `findings` count, thanks @coletebou.
 - Fixed `clawpatch open-pr` so repositories without default-branch metadata use a dedicated patch branch and let GitHub choose the PR base.
 - Fixed `clawpatch open-pr` retries to push the recorded patch commit instead of any later local branch tip.
 - Fixed first-time `clawpatch open-pr` branch creation to start from the recorded patch base.
 - Fixed command execution so providers that exit before reading stdin do not surface benign `EPIPE` errors.
 - Fixed `clawpatch ci --since` empty-review output so it reports `reviewed: 0`.
-- Fixed acpx provider error reporting by reading the terminal `result.stopReason` envelope and surfacing non-`end_turn` reasons as typed `ClawpatchError` codes (`agent-cancelled`, `agent-refused`, `agent-truncated`) instead of opaque `malformed-output`.
+- Fixed formatter configuration so `oxfmt` uses two-space indentation consistently across platforms.
+- Added generic package-less monorepo app-root mapping for Node/Next projects under roots such as `apps/*` and `packages/*` when positive source or framework signals are present.
+- Added Maven project mapping for root, nested, and multi-module Java/Kotlin projects with Spring role slices, Maven validation defaults, and `pom.xml` detection, thanks @julianshess.
+- Added a release-prep checklist for auditing changelog, package metadata, and dry-run package contents without publishing.
+- Improved bounded source grouping so large flat directories split repeated filename families like command, plugin, doctor, and runtime files into more coherent review slices.
+- Fixed acpx provider error reporting by reading the terminal `result.stopReason` envelope and surfacing non-`end_turn` reasons as typed `ClawpatchError` codes (`agent-cancelled`, `agent-refused`, `agent-truncated`) instead of opaque `malformed-output`, thanks @coletebou.
 - Improved OpenCode malformed JSON diagnostics with output length, event kinds, and a bounded preview, thanks @rohitjavvadi.
+- Fixed finding signatures so equivalent evidence remains stable across re-reviews, thanks @rohitjavvadi.
+- Fixed provider exit-code classification for stdout-only authentication and quota failures, thanks @rohitjavvadi.
+- Improved Node route mapping to preserve literal Express and Hono mount prefixes, thanks @rohitjavvadi.
+- Improved Flask route mapping to preserve static blueprint URL prefixes, thanks @rohitjavvadi.
+- Improved Django route mapping to preserve literal `include()` route prefixes, thanks @rohitjavvadi.
+- Added conservative Rails route mapping for literal root and HTTP verb routes, thanks @rohitjavvadi.
+- Fixed heuristic feature mapping to honor configured path include/exclude filters, thanks @schedawg74.
 - Fixed Express route mapping for aliased Router imports that follow block comment banners, thanks @rohitjavvadi.
+- Fixed Laravel route mapping to include array-style `Route::group` prefixes, thanks @rohitjavvadi.
+- Fixed Fastify route-object mapping to emit static method arrays while ignoring dynamic entries, thanks @rohitjavvadi.
+- Fixed Fastify plugin callback route mapping for typed parameters and plugin aliases, thanks @rohitjavvadi.
+- Fixed FastAPI route mapping to include static `APIRouter(prefix=...)` values, thanks @AsishKumarDalal.
+- Added `--include-dirty` to review, CI, and revalidation file filters for auditing uncommitted worktree changes, thanks @AsishKumarDalal.
 - Fixed Bun package-manager detection to recognize the text `bun.lock` lockfile, thanks @austinm911.
+- Fixed review-output schema to tolerate optional `reproduction` and `minimumFixScope` fields and zero-valued evidence line numbers (normalized to `null`), recovering 4 of 28 zod issue patterns observed in run `20260517T190759-3c9e9e` (78 errors over 1000 features) that previously dropped whole-feature output instead of the affected finding.
 
 ## 0.3.0 - 2026-05-18
 

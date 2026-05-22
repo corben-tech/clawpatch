@@ -2,21 +2,64 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ClawpatchError } from "./errors.js";
 import { __testing, extractJson, providerByName } from "./provider.js";
 import { safeProviderPreview } from "./provider-json.js";
-import { revalidateOutputSchema, reviewOutputSchema } from "./types.js";
+import { evidenceRefSchema, revalidateOutputSchema, reviewOutputSchema } from "./types.js";
 
 // eslint-disable-next-line no-underscore-dangle
 const {
-  addCodexSandboxArgs,
-  addCodexModelArgs,
   acpxFailureMessage,
+  acpxPromptRetries,
+  addCodexModelArgs,
+  addCodexSandboxArgs,
+  buildAcpxJsonArgs,
   codexFailureMessage,
   extractAcpxJson,
   extractOpencodeJson,
+  formatZodError,
+  formatZodIssue,
+  parseAcpxJsonOutput,
   parseAcpxAgent,
   parseCodexJson,
+  parseReviewOutput,
+  parseOrThrow,
   piThinkingLevel,
+  providerExitCode,
   providerJsonSchema,
 } = __testing;
+
+function makeFinding(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    title: "Sample finding",
+    category: "bug",
+    severity: "medium",
+    confidence: "high",
+    evidence: [],
+    reasoning: "Sample reasoning.",
+    reproduction: null,
+    recommendation: "Sample recommendation.",
+    whyTestsDoNotAlreadyCoverThis: "Tests do not encode this case.",
+    suggestedRegressionTest: null,
+    minimumFixScope: "Touch only the offending line.",
+    ...overrides,
+  };
+}
+
+function withEnv(name: string, value: string | undefined, fn: () => void): void {
+  const previous = process.env[name];
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+  try {
+    fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = previous;
+    }
+  }
+}
 
 function updateEnvelope(update: object): string {
   return JSON.stringify({
@@ -260,6 +303,20 @@ describe("providerJsonSchema", () => {
       expect(enumNodes.every((node) => node["type"] === "string")).toBe(true);
     }
   });
+
+  it("keeps object schemas strict even when parser input fields are optional", () => {
+    const schema = providerJsonSchema(reviewOutputSchema) as Record<string, unknown>;
+    const findings = propertySchema(schema, "findings");
+    const finding = itemSchema(findings);
+    const inspected = propertySchema(schema, "inspected");
+
+    for (const objectSchema of [schema, finding, inspected]) {
+      expect(objectSchema["additionalProperties"]).toBe(false);
+      expect(objectSchema["required"]).toEqual(Object.keys(propertiesOf(objectSchema)));
+    }
+    expect(finding["required"]).toContain("reproduction");
+    expect(finding["required"]).toContain("minimumFixScope");
+  });
 });
 
 describe("piThinkingLevel", () => {
@@ -294,6 +351,30 @@ function enumSchemaNodes(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(node["enum"]) ? [node, ...nested] : nested;
 }
 
+function propertySchema(schema: Record<string, unknown>, name: string): Record<string, unknown> {
+  const value = propertiesOf(schema)[name];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`missing schema property: ${name}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function itemSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const value = schema["items"];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("missing item schema");
+  }
+  return value as Record<string, unknown>;
+}
+
+function propertiesOf(schema: Record<string, unknown>): Record<string, unknown> {
+  const value = schema["properties"];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("missing schema properties");
+  }
+  return value as Record<string, unknown>;
+}
+
 describe("codexFailureMessage", () => {
   it("adds scope guidance for missing Responses API write permission", () => {
     const message = codexFailureMessage(
@@ -304,6 +385,57 @@ describe("codexFailureMessage", () => {
     expect(message).toContain("codex provider failed");
     expect(message).toContain("api.responses.write");
     expect(message).toContain("restricted key scopes");
+  });
+});
+
+describe("providerExitCode", () => {
+  it("classifies auth failures from stdout-only provider output", () => {
+    expect(providerExitCode("Unauthorized: Wrong API Key", "")).toBe(4);
+    expect(providerExitCode("auth required", "")).toBe(4);
+    expect(providerExitCode("Incorrect API key provided", "")).toBe(4);
+    expect(providerExitCode("invalid_api_key", "")).toBe(4);
+    expect(providerExitCode("API key is required", "")).toBe(4);
+    expect(providerExitCode("API key not found", "")).toBe(4);
+    expect(providerExitCode("OPENAI_API_KEY is not set", "")).toBe(4);
+    expect(providerExitCode("insufficient permissions", "")).toBe(4);
+    expect(providerExitCode("api.responses.write scope is required", "")).toBe(4);
+    expect(providerExitCode("AuthenticationError: invalid credentials", "")).toBe(4);
+    expect(providerExitCode("authentication_error", "")).toBe(4);
+    expect(providerExitCode("AUTH_REQUIRED", "")).toBe(4);
+  });
+
+  it("classifies quota failures from stdout-only provider output", () => {
+    expect(providerExitCode("quota exceeded for this organization", "")).toBe(5);
+    expect(providerExitCode("You exceeded your current quota", "")).toBe(5);
+    expect(providerExitCode("insufficient_quota", "")).toBe(5);
+    expect(providerExitCode("quota_exceeded", "")).toBe(5);
+    expect(providerExitCode("RateLimitError: retry later", "")).toBe(5);
+    expect(providerExitCode("rate_limit_error", "")).toBe(5);
+  });
+
+  it("does not classify benign auth-looking stdout as auth failures", () => {
+    expect(providerExitCode("author: Jane", "")).toBe(1);
+    expect(providerExitCode("registered oauth-callback route", "")).toBe(1);
+    expect(providerExitCode("authority metadata loaded", "")).toBe(1);
+  });
+
+  it("does not classify generic rate-limiting discussion as quota failures", () => {
+    expect(providerExitCode("consider adding rate-limiting to this endpoint", "")).toBe(1);
+    expect(providerExitCode("document the rate limit policy for future work", "")).toBe(1);
+  });
+
+  it("keeps classifying real rate-limit failures", () => {
+    expect(providerExitCode("rate limit exceeded for this organization", "")).toBe(5);
+  });
+
+  it("keeps classifying stderr failures", () => {
+    expect(providerExitCode("", "please login before running the provider")).toBe(4);
+    expect(providerExitCode("", "expired API key")).toBe(4);
+    expect(providerExitCode("", "auth credentials not found")).toBe(4);
+  });
+
+  it("keeps generic failures when neither stream has a known signal", () => {
+    expect(providerExitCode("process exited unexpectedly", "")).toBe(1);
   });
 });
 
@@ -391,6 +523,47 @@ describe("extractAcpxJson", () => {
     const stdout = textChunk("agent_message_chunk", 'Here is the JSON:\n{"ok":true}');
 
     expect(extractAcpxJson(stdout)).toEqual({ ok: true });
+  });
+
+  it("prefers a later complete message after a stale retry attempt", () => {
+    const stdout = [
+      textChunk("agent_message_chunk", '{"ok":false}'),
+      textChunk("agent_message_chunk", '{"ok":true}'),
+    ].join("\n");
+
+    expect(
+      parseAcpxJsonOutput(stdout, (output) => {
+        if (
+          typeof output === "object" &&
+          output !== null &&
+          (output as { ok?: unknown }).ok === true
+        ) {
+          return output;
+        }
+        throw new Error("wrong attempt");
+      }),
+    ).toEqual({ ok: true });
+  });
+
+  it("recovers from a partial message before a retry attempt", () => {
+    const stdout = [
+      textChunk("agent_message_chunk", '{"ok":'),
+      textChunk("agent_message_chunk", '{"ok":true}'),
+    ].join("\n");
+
+    expect(parseAcpxJsonOutput(stdout, (output) => output)).toEqual({ ok: true });
+  });
+
+  it("keeps scanning when a retry-safe suffix is only a nested object", () => {
+    const stdout = [
+      textChunk("agent_message_chunk", '{"findings":[],"inspected":'),
+      textChunk("agent_message_chunk", '{"files":[],"symbols":[],"notes":[]}}'),
+    ].join("\n");
+
+    expect(parseAcpxJsonOutput(stdout, (output) => reviewOutputSchema.parse(output))).toEqual({
+      findings: [],
+      inspected: { files: [], symbols: [], notes: [] },
+    });
   });
 
   it("throws malformed-output with observed envelope kinds when nothing is extractable", () => {
@@ -642,6 +815,230 @@ describe("extractOpencodeJson", () => {
     }
     throw new Error("expected provider auth failure");
   });
+
+  it("classifies opencode stderr-style error events as provider auth failures", () => {
+    const stdout = JSON.stringify({
+      type: "error",
+      error: { data: { message: "auth credentials not found" } },
+    });
+
+    try {
+      extractOpencodeJson(stdout);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ClawpatchError);
+      expect((err as ClawpatchError).exitCode).toBe(4);
+      return;
+    }
+    throw new Error("expected provider auth failure");
+  });
+
+  it("classifies opencode stderr-style error events as provider quota failures", () => {
+    const stdout = JSON.stringify({
+      type: "error",
+      error: { data: { message: "rate limit" } },
+    });
+
+    try {
+      extractOpencodeJson(stdout);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ClawpatchError);
+      expect((err as ClawpatchError).exitCode).toBe(5);
+      return;
+    }
+    throw new Error("expected provider quota failure");
+  });
+});
+
+describe("parseReviewOutput", () => {
+  it("preserves all findings when every finding is valid (fast path)", () => {
+    const output = {
+      findings: [
+        makeFinding({ title: "first", category: "bug" }),
+        makeFinding({ title: "second", category: "security" }),
+        makeFinding({ title: "third", category: "performance" }),
+      ],
+      inspected: { files: ["src/a.ts"], symbols: [], notes: [] },
+    };
+
+    const result = parseReviewOutput(output);
+
+    expect(result.findings).toHaveLength(3);
+    expect(result.findings.map((f) => f.title)).toEqual(["first", "second", "third"]);
+    expect(result.droppedFindings).toEqual([]);
+    expect(result.inspected.files).toEqual(["src/a.ts"]);
+  });
+
+  it("keeps valid siblings when one finding has an invalid category", () => {
+    const output = {
+      findings: [
+        makeFinding({ title: "first", category: "bug" }),
+        makeFinding({ title: "second", category: "security" }),
+        makeFinding({ title: "third", category: "quality" }), // invalid enum value
+        makeFinding({ title: "fourth", category: "performance" }),
+      ],
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+
+    const result = parseReviewOutput(output);
+
+    expect(result.findings).toHaveLength(3);
+    expect(result.findings.map((f) => f.title)).toEqual(["first", "second", "fourth"]);
+    expect(result.droppedFindings).toHaveLength(1);
+    const dropped = result.droppedFindings[0]!;
+    expect(dropped.path[0]).toBe("findings");
+    expect(dropped.path[1]).toBe(2);
+    expect(dropped.path).toContain("category");
+    expect(dropped.message).toBeTypeOf("string");
+    expect(dropped.sample).toContain("quality");
+    expect(dropped.sample.length).toBeLessThanOrEqual(200);
+  });
+
+  it("throws ClawpatchError when findings is not an array", () => {
+    const output = {
+      findings: "not-an-array",
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+
+    try {
+      parseReviewOutput(output);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ClawpatchError);
+      expect((err as ClawpatchError).code).toBe("malformed-output");
+      expect((err as ClawpatchError).exitCode).toBe(8);
+      expect((err as Error).message).toMatch(/findings/u);
+      return;
+    }
+    throw new Error("expected parseReviewOutput to throw on non-array findings");
+  });
+
+  it("truncates oversized samples to 200 characters", () => {
+    const longTitle = "x".repeat(500);
+    const output = {
+      findings: [
+        makeFinding({ title: longTitle, category: "quality" }), // invalid → dropped
+      ],
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+
+    const result = parseReviewOutput(output);
+
+    expect(result.droppedFindings).toHaveLength(1);
+    expect(result.droppedFindings[0]!.sample.length).toBeLessThanOrEqual(200);
+    expect(result.droppedFindings[0]!.sample.endsWith("...")).toBe(true);
+  });
+});
+
+function makeBadReview(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    findings: [
+      {
+        title: "x",
+        category: "quality",
+        severity: "medium",
+        confidence: "high",
+        evidence: [],
+        reasoning: "r",
+        reproduction: null,
+        recommendation: "rec",
+        whyTestsDoNotAlreadyCoverThis: "w",
+        suggestedRegressionTest: null,
+        minimumFixScope: "m",
+        ...overrides,
+      },
+    ],
+    inspected: { files: [], symbols: [], notes: [] },
+  };
+}
+
+describe("formatZodError", () => {
+  it("reports invalid enum compactly with bad value and expected list", () => {
+    const input = makeBadReview();
+    const result = reviewOutputSchema.safeParse(input);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const msg = formatZodError(result.error, input);
+    expect(msg).toMatch(/findings\[0\]\.category="quality"/u);
+    expect(msg).toMatch(/invalid_value/u);
+    expect(msg).toMatch(/expected one of [^()]*\bbug\b/u);
+    expect(msg.split("\n")).toHaveLength(1);
+  });
+
+  it("reports missing required field compactly", () => {
+    const bad = {
+      findings: [
+        {
+          title: "x",
+          category: "bug",
+          severity: "medium",
+          confidence: "high",
+          evidence: [],
+          reproduction: null,
+          recommendation: "rec",
+          whyTestsDoNotAlreadyCoverThis: "w",
+          suggestedRegressionTest: null,
+          minimumFixScope: "m",
+          // reasoning omitted on purpose
+        },
+      ],
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+    const result = reviewOutputSchema.safeParse(bad);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const msg = formatZodError(result.error, bad);
+    expect(msg).toMatch(/findings\[0\]\.reasoning/u);
+    expect(msg).toMatch(/invalid_type/u);
+    expect(msg).toMatch(/expected string/u);
+  });
+
+  it("truncates long received string values to a bounded preview", () => {
+    const longValue = "a".repeat(500);
+    const issue = formatZodIssue({
+      code: "invalid_type",
+      path: ["findings", 0, "reasoning"],
+      message: "x",
+      expected: "string",
+      received: longValue,
+    } as unknown as Parameters<typeof formatZodIssue>[0]);
+    expect(issue.length).toBeLessThan(longValue.length);
+    expect(issue).toMatch(/findings\[0\]\.reasoning=/u);
+  });
+
+  it("includes a +N more suffix when zod reports many issues", () => {
+    const fakeError = {
+      issues: Array.from({ length: 5 }, (_, i) => ({
+        code: "invalid_type",
+        path: ["x", i],
+        message: "x",
+        expected: "string",
+        received: "n",
+      })),
+    } as unknown as Parameters<typeof formatZodError>[0];
+    const msg = formatZodError(fakeError);
+    expect(msg).toMatch(/\(\+2 more\)$/u);
+  });
+});
+
+describe("parseOrThrow", () => {
+  it("returns parsed data on success", () => {
+    const ok = {
+      findings: [],
+      inspected: { files: [], symbols: [], notes: [] },
+    };
+    expect(parseOrThrow(reviewOutputSchema, ok, "test")).toEqual(ok);
+  });
+
+  it("throws ClawpatchError with malformed-output / exit 8 on bad input", () => {
+    expectMalformed(
+      () =>
+        parseOrThrow(
+          reviewOutputSchema,
+          { findings: [{ category: "quality" }], inspected: {} },
+          "test-label",
+        ),
+      /test-label: schema validation failed: findings\[0\]/u,
+    );
+  });
 });
 
 describe("providerByName", () => {
@@ -656,5 +1053,173 @@ describe("providerByName", () => {
     expect(providerByName("codex").name).toBe("codex");
     expect(providerByName("mock").name).toBe("mock");
     expect(providerByName("mock-fail").name).toBe("mock-fail");
+  });
+});
+
+function buildToleranceFinding(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    title: "x",
+    category: "bug",
+    severity: "low",
+    confidence: "low",
+    evidence: [],
+    reasoning: "r",
+    reproduction: null,
+    recommendation: "rec",
+    whyTestsDoNotAlreadyCoverThis: "",
+    suggestedRegressionTest: null,
+    minimumFixScope: "",
+    ...overrides,
+  };
+}
+
+function buildToleranceOutput(finding: Record<string, unknown>): Record<string, unknown> {
+  return {
+    findings: [finding],
+    inspected: { files: [], symbols: [], notes: [] },
+  };
+}
+
+describe("reviewOutputSchema tolerance", () => {
+  it("accepts findings with null reproduction", () => {
+    const parsed = reviewOutputSchema.parse(
+      buildToleranceOutput(buildToleranceFinding({ reproduction: null })),
+    );
+    expect(parsed.findings[0]!.reproduction).toBeNull();
+  });
+
+  it("accepts findings with omitted reproduction (becomes null)", () => {
+    const finding = buildToleranceFinding();
+    delete finding["reproduction"];
+    const parsed = reviewOutputSchema.parse(buildToleranceOutput(finding));
+    expect(parsed.findings[0]!.reproduction).toBeNull();
+  });
+
+  it("accepts findings with omitted minimumFixScope (becomes empty string)", () => {
+    const finding = buildToleranceFinding();
+    delete finding["minimumFixScope"];
+    const parsed = reviewOutputSchema.parse(buildToleranceOutput(finding));
+    expect(parsed.findings[0]!.minimumFixScope).toBe("");
+  });
+});
+
+describe("evidenceRefSchema tolerance", () => {
+  it("accepts startLine 0 and normalizes to null", () => {
+    const parsed = evidenceRefSchema.parse({
+      path: "src/index.ts",
+      startLine: 0,
+      endLine: 5,
+      symbol: null,
+      quote: null,
+    });
+    expect(parsed.startLine).toBeNull();
+    expect(parsed.endLine).toBeNull();
+  });
+
+  it("accepts endLine 0 and normalizes to null", () => {
+    const parsed = evidenceRefSchema.parse({
+      path: "src/index.ts",
+      startLine: 5,
+      endLine: 0,
+      symbol: null,
+      quote: null,
+    });
+    expect(parsed.startLine).toBeNull();
+    expect(parsed.endLine).toBeNull();
+  });
+});
+
+describe("acpxPromptRetries", () => {
+  afterEach(() => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+  });
+
+  it("defaults to 1 when env var is unset", () => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+    expect(acpxPromptRetries()).toBe(1);
+  });
+
+  it("respects a numeric env override", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "3", () => {
+      expect(acpxPromptRetries()).toBe(3);
+    });
+  });
+
+  it("treats 0 as a valid override (disables retries)", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "0", () => {
+      expect(acpxPromptRetries()).toBe(0);
+    });
+  });
+
+  it("falls back to 1 on invalid input", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "not-a-number", () => {
+      expect(acpxPromptRetries()).toBe(1);
+    });
+  });
+
+  it("falls back to 1 on negative input", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "-2", () => {
+      expect(acpxPromptRetries()).toBe(1);
+    });
+  });
+});
+
+describe("buildAcpxJsonArgs", () => {
+  afterEach(() => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+  });
+
+  it("includes --prompt-retries 1 by default", () => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+    const args = buildAcpxJsonArgs("/tmp/repo", null, "read");
+    expect(args).toEqual([
+      "--cwd",
+      "/tmp/repo",
+      "--approve-reads",
+      "--format",
+      "json",
+      "--json-strict",
+      "--suppress-reads",
+      "--prompt-retries",
+      "1",
+      "codex",
+      "exec",
+      "--file",
+      "-",
+    ]);
+  });
+
+  it("honors CLAWPATCH_ACPX_PROMPT_RETRIES env override", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "4", () => {
+      const args = buildAcpxJsonArgs("/tmp/repo", null, "read");
+      const idx = args.indexOf("--prompt-retries");
+      expect(idx).toBeGreaterThanOrEqual(0);
+      expect(args[idx + 1]).toBe("4");
+      expect(args).toContain("--approve-reads");
+    });
+  });
+
+  it("omits --prompt-retries for approve mode", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "4", () => {
+      const args = buildAcpxJsonArgs("/tmp/repo", null, "approve");
+      expect(args).toContain("--approve-all");
+      expect(args).not.toContain("--prompt-retries");
+    });
+  });
+
+  it("omits --prompt-retries when CLAWPATCH_ACPX_PROMPT_RETRIES=0", () => {
+    withEnv("CLAWPATCH_ACPX_PROMPT_RETRIES", "0", () => {
+      const args = buildAcpxJsonArgs("/tmp/repo", null, "read");
+      expect(args).not.toContain("--prompt-retries");
+    });
+  });
+
+  it("passes through agent and model from parseAcpxAgent", () => {
+    delete process.env["CLAWPATCH_ACPX_PROMPT_RETRIES"];
+    const args = buildAcpxJsonArgs("/tmp/repo", "gamma:opus", "read");
+    const modelIdx = args.indexOf("--model");
+    expect(modelIdx).toBeGreaterThanOrEqual(0);
+    expect(args[modelIdx + 1]).toBe("opus");
+    expect(args).toContain("gamma");
   });
 });

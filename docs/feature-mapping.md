@@ -31,9 +31,14 @@ Supported deterministic mappers today:
 - npm package bins
 - selected root and workspace package scripts
 - Node/TypeScript workspace packages from `package.json` workspaces, `pnpm-workspace.yaml`, and common package folders
+- package-less Node/TypeScript app roots under monorepo folders such as
+  `apps/*` and `packages/*` when source files or positive framework signals are
+  present
 - Nx project metadata from `project.json`, including project names, source roots, project types, and target names
 - Turborepo `turbo.json` metadata for workspace-aware validation commands and feature context
-- bounded Node/TypeScript source groups under `src/`, `lib/`, `app/`, `pages/`, and `scripts/`
+- bounded Node/TypeScript source groups under `src/`, `lib/`, `app/`,
+  `pages/`, `scripts/`, `server/`, and `api/`, with oversized flat
+  directories split by repeated filename families
 - React Router `<Route path element>` declarations and React components in
   root or nested frontend packages such as `frontend/`, `client/`, `web/`,
   workspaces, and packages under `apps/` or `packages/`
@@ -57,6 +62,8 @@ Supported deterministic mappers today:
 - nested SwiftPM packages
 - Apple/Xcode projects from `project.yml`, `.xcodeproj`, or `.xcworkspace`
 - Java/Kotlin Gradle modules from `settings.gradle(.kts)` and `build.gradle(.kts)`
+- Java/Kotlin Maven modules from root and nested `pom.xml` files, including
+  multi-module projects
 - Laravel/PHP projects from `composer.json` and `artisan`, including controllers
   referenced by routes, form requests, Artisan commands, jobs, services, models,
   migrations, seeders, Composer scripts, and grouped PHP test suites
@@ -95,10 +102,13 @@ and `plugins/*` are tagged as extension packages and keep package metadata,
 source, docs, and tests together as review context.
 
 In JavaScript/TypeScript monorepos, project discovery runs before framework
-mapping. Workspace packages and Nx projects are normalized into project roots,
-so framework mappers can apply the same heuristics to `apps/*` and `packages/*`
-that they apply at the repository root. Feature tags include project name and
-project root metadata, enabling commands such as:
+mapping. Workspace packages, Nx projects, and package-less app roots with source
+or positive framework signals are normalized into project roots, so framework
+mappers can apply the same heuristics to `apps/*` and `packages/*` that they
+apply at the repository root. Hoisted Next route mapping uses positive evidence
+such as local Next commands, local Next config, App Router files, or Pages API
+files instead of trying to enumerate every non-Next config file. Feature tags
+include project name and project root metadata, enabling commands such as:
 
 ```bash
 clawpatch review --project apps/web --limit 10
@@ -122,12 +132,15 @@ lazy import, and also maps page/component files under `src/pages` and
 `src/components` as UI-flow slices.
 Native app mappers use the same bounded grouping model. SwiftPM packages can be
 discovered below the repo root, Apple projects are grouped by Swift source area,
-and Gradle modules are grouped from `src/main`, `src/test`, and `src/androidTest`.
-Root Gradle projects get default `gradle`/`./gradlew` build and test commands.
-Java and Kotlin files in Gradle modules also get role-oriented review slices
-when code evidence identifies web entrypoints, services, persistence boundaries,
-external clients, configuration, framework components, extension boundaries,
-Android UI entrypoints, ViewModels, data boundaries, or dependency injection.
+Gradle modules are grouped from `src/main`, `src/test`, and `src/androidTest`,
+and Maven modules are grouped from `src/main` and `src/test`. Root Gradle
+projects get default `gradle`/`./gradlew` build and test commands; root Maven
+projects get default `mvn`/`./mvnw` compile and test commands.
+Java and Kotlin files in Gradle modules, plus Java files in Maven modules, also
+get role-oriented review slices when code evidence identifies web entrypoints,
+services, persistence boundaries, external clients, configuration, framework
+components, extension boundaries, Android UI entrypoints, ViewModels, data
+boundaries, or dependency injection.
 Kotlin dependency-injection evidence includes Hilt, Dagger, Koin, and Metro
 annotations and imports.
 
@@ -153,12 +166,13 @@ pytest files; Flask `@*.route(...)` handlers; FastAPI `@*.get(...)` /
 `re_path(...)`, and legacy `url(...)` declarations. Flask and FastAPI route
 methods are read from list, tuple, or set literals. FastAPI paths can be
 positional strings or literal `path=` keywords. Django route paths are normalized
-from literal route strings and simple named regex groups; includes are mapped as
-their own URL groups without recursively expanding imported URL configs. Default
+from literal route strings and simple named regex groups, and literal
+`include("module.urls")` routes are expanded under their mount prefixes. Default
 Python command detection covers pytest, ruff, mypy, pyright, and black.
 
 Ruby mapping covers project metadata, executables, source groups, RSpec and
-Minitest suites, and Rails app structure. Rails legacy `config/secrets.yml`,
+Minitest suites, Rails app structure, and literal Rails root and HTTP verb
+routes. Rails legacy `config/secrets.yml`,
 `config/database.yml`, and `config/initializers/secret_token.rb` are not mapped
 as reviewable config because they can contain provider-sensitive secrets.
 

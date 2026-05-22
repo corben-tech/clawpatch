@@ -27,6 +27,22 @@ type ServerRoute = {
   symbol: string | null;
 };
 
+type MountedRouteTarget = {
+  parent: string;
+  child: string;
+  prefix: string;
+};
+
+type MountedRouteTargets = {
+  mounts: MountedRouteTarget[];
+  unknownMountedTargets: Set<string>;
+};
+
+type RouteTargetPrefixes = {
+  prefixes: Map<string, string[]>;
+  unknownTargets: Set<string>;
+};
+
 const sourceRoots = ["src", "lib", "app", "server", "routes", "api"] as const;
 const sourceExtensions = ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"] as const;
 const rootEntryNames = ["server", "app", "index", "main", "api"] as const;
@@ -158,14 +174,18 @@ function parseServerRoutes(
   const routes: ServerRoute[] = [];
   for (const framework of projectFrameworks) {
     const targets = routeTargetNames(source, framework);
-    if (targets.size === 0) {
+    const scopedFastifyRoutes =
+      framework === "fastify" ? fastifyScopedCallbackRoutes(source, filePath) : [];
+    if (targets.size === 0 && scopedFastifyRoutes.length === 0) {
       continue;
     }
-    routes.push(...directMethodRoutes(source, filePath, framework, targets));
+    const prefixes = mountedRouteTargetPrefixes(source, framework, targets);
+    routes.push(...directMethodRoutes(source, filePath, framework, targets, prefixes));
     if (framework === "express") {
-      routes.push(...expressRouteChains(source, filePath, targets));
+      routes.push(...expressRouteChains(source, filePath, targets, prefixes));
     } else if (framework === "fastify") {
       routes.push(...fastifyRouteObjects(source, filePath, targets));
+      routes.push(...scopedFastifyRoutes);
     }
   }
   return uniqueRoutes(routes);
@@ -176,6 +196,7 @@ function directMethodRoutes(
   filePath: string,
   framework: ServerFramework,
   targets: ReadonlySet<string>,
+  prefixes: RouteTargetPrefixes = emptyRouteTargetPrefixes(),
 ): ServerRoute[] {
   const routes: ServerRoute[] = [];
   routeMethodPattern.lastIndex = 0;
@@ -200,13 +221,16 @@ function directMethodRoutes(
       continue;
     }
     const callEnd = endOfCall(source, openParenIndex + 1);
-    routes.push({
-      framework,
-      filePath,
-      method: method.toUpperCase(),
-      routePath: routePath.value,
-      symbol: callEnd === null ? null : readHandlerSymbol(source, routePath.end, callEnd - 1),
-    });
+    const symbol = callEnd === null ? null : readHandlerSymbol(source, routePath.end, callEnd - 1);
+    for (const resolvedPath of routePathsForTarget(prefixes, target, routePath.value)) {
+      routes.push({
+        framework,
+        filePath,
+        method: method.toUpperCase(),
+        routePath: resolvedPath,
+        symbol,
+      });
+    }
   }
   return routes;
 }
@@ -238,19 +262,22 @@ function fastifyRouteObjects(
       continue;
     }
     const routeObject = source.slice(objectStart, objectEnd);
-    const method = readStringProperty(routeObject, "method");
+    const methods = readStringPropertyValues(routeObject, "method");
     const routePath =
       readStringProperty(routeObject, "url") ?? readStringProperty(routeObject, "path");
-    if (method === null || routePath === null || !isRoutePath(routePath)) {
+    if (methods.length === 0 || routePath === null || !isRoutePath(routePath)) {
       continue;
     }
-    routes.push({
-      framework: "fastify",
-      filePath,
-      method: method.toUpperCase(),
-      routePath,
-      symbol: readIdentifierProperty(routeObject, "handler"),
-    });
+    const symbol = readIdentifierProperty(routeObject, "handler");
+    for (const method of methods) {
+      routes.push({
+        framework: "fastify",
+        filePath,
+        method: method.toUpperCase(),
+        routePath,
+        symbol,
+      });
+    }
   }
   return routes;
 }
@@ -259,6 +286,7 @@ function expressRouteChains(
   source: string,
   filePath: string,
   targets: ReadonlySet<string>,
+  prefixes: RouteTargetPrefixes = emptyRouteTargetPrefixes(),
 ): ServerRoute[] {
   const routes: ServerRoute[] = [];
   routeChainPattern.lastIndex = 0;
@@ -282,16 +310,344 @@ function expressRouteChains(
       continue;
     }
     for (const method of expressChainMethods(source, routePath.end)) {
-      routes.push({
-        framework: "express",
-        filePath,
-        method,
-        routePath: routePath.value,
-        symbol: null,
-      });
+      for (const resolvedPath of routePathsForTarget(prefixes, target, routePath.value)) {
+        routes.push({
+          framework: "express",
+          filePath,
+          method,
+          routePath: resolvedPath,
+          symbol: null,
+        });
+      }
     }
   }
   return routes;
+}
+
+function mountedRouteTargetPrefixes(
+  source: string,
+  framework: ServerFramework,
+  targets: ReadonlySet<string>,
+): RouteTargetPrefixes {
+  if (framework !== "express" && framework !== "hono") {
+    return emptyRouteTargetPrefixes();
+  }
+  const mounts =
+    framework === "express"
+      ? mountedTargets(source, targets, "use")
+      : mountedTargets(source, targets, "route");
+  return resolveMountedRouteTargetPrefixes(mounts, targets);
+}
+
+function mountedTargets(
+  source: string,
+  targets: ReadonlySet<string>,
+  method: "route" | "use",
+): MountedRouteTargets {
+  const mounts: MountedRouteTarget[] = [];
+  const unknownMountedTargets = new Set<string>();
+  const pattern = new RegExp(
+    `(^|[^A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\\s*\\.\\s*${method}\\s*\\(`,
+    "gu",
+  );
+  pattern.lastIndex = 0;
+  for (const match of source.matchAll(pattern)) {
+    const matchIndex = match.index ?? 0;
+    const targetIndex = matchIndex + (match[1]?.length ?? 0);
+    if (isInsideCommentOrString(source, targetIndex)) {
+      continue;
+    }
+    const parent = match[2];
+    if (parent === undefined || !targets.has(parent)) {
+      continue;
+    }
+    const openParenIndex = matchIndex + match[0].lastIndexOf("(");
+    const callEnd = endOfCall(source, openParenIndex + 1);
+    if (callEnd === null) {
+      continue;
+    }
+    const args = splitTopLevelArguments(source.slice(openParenIndex + 1, callEnd - 1));
+    const literalPrefixes =
+      args[0] === undefined
+        ? null
+        : method === "use"
+          ? standaloneMountPrefixes(args[0])
+          : singletonMountPrefix(args[0]);
+    const pathlessExpressMount =
+      method === "use" &&
+      (isPathlessExpressMount(source, args) || isPathlessExpressChildMount(args, parent, targets));
+    const prefixes = literalPrefixes ?? (pathlessExpressMount ? ["/"] : null);
+    if (prefixes === null || !prefixes.every(isMountPrefix)) {
+      if (method === "route" || isLikelyDynamicMountPrefix(source, args[0]?.trim() ?? "")) {
+        const childArgs = method === "use" ? args.slice(1) : args.slice(1, 2);
+        for (const childArg of childArgs) {
+          const child = childArg.trim();
+          if (isSimpleIdentifier(child) && child !== parent && targets.has(child)) {
+            unknownMountedTargets.add(child);
+          }
+        }
+      }
+      continue;
+    }
+    const childArgs =
+      method === "use" ? args.slice(literalPrefixes === null ? 0 : 1) : args.slice(1, 2);
+    for (const childArg of childArgs) {
+      const child = childArg.trim();
+      if (!isSimpleIdentifier(child) || child === parent || !targets.has(child)) {
+        continue;
+      }
+      for (const prefix of prefixes) {
+        mounts.push({ parent, child, prefix });
+      }
+    }
+  }
+  return { mounts, unknownMountedTargets };
+}
+
+function resolveMountedRouteTargetPrefixes(
+  routeMounts: MountedRouteTargets,
+  targets: ReadonlySet<string>,
+): RouteTargetPrefixes {
+  const mountsByChild = new Map<string, MountedRouteTarget[]>();
+  for (const mount of routeMounts.mounts) {
+    mountsByChild.set(mount.child, [...(mountsByChild.get(mount.child) ?? []), mount]);
+  }
+  const resolved = new Map<string, string[]>();
+  const unknown = new Set<string>();
+  const resolving = new Set<string>();
+
+  const resolve = (target: string): string[] | null => {
+    if (unknown.has(target)) {
+      return null;
+    }
+    const cached = resolved.get(target);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (resolving.has(target)) {
+      return [];
+    }
+    resolving.add(target);
+    const prefixes: string[] = [];
+    for (const mount of mountsByChild.get(target) ?? []) {
+      const parentPrefixes = resolve(mount.parent);
+      if (parentPrefixes === null) {
+        unknown.add(target);
+        continue;
+      } else if (parentPrefixes.length === 0) {
+        prefixes.push(mount.prefix);
+      } else {
+        prefixes.push(...parentPrefixes.map((prefix) => joinRoutePaths(prefix, mount.prefix)));
+      }
+    }
+    resolving.delete(target);
+    const uniquePrefixes = [...new Set(prefixes)];
+    resolved.set(target, uniquePrefixes);
+    if (uniquePrefixes.length === 0 && routeMounts.unknownMountedTargets.has(target)) {
+      unknown.add(target);
+      return null;
+    }
+    return uniquePrefixes;
+  };
+
+  for (const target of targets) {
+    resolve(target);
+  }
+
+  return {
+    prefixes: new Map([...resolved].filter(([, prefixes]) => prefixes.length > 0)),
+    unknownTargets: unknown,
+  };
+}
+
+function isPathlessExpressChildMount(
+  args: string[],
+  parent: string,
+  targets: ReadonlySet<string>,
+): boolean {
+  if (args.length === 0) {
+    return false;
+  }
+  return args.every((arg) => {
+    const child = arg.trim();
+    return isSimpleIdentifier(child) && child !== parent && targets.has(child);
+  });
+}
+
+function isPathlessExpressMount(source: string, args: string[]): boolean {
+  const first = args[0]?.trim();
+  if (first === undefined || standaloneStringLiteral(first) !== null) {
+    return false;
+  }
+  if (isLikelyDynamicMountPrefix(source, first)) {
+    return false;
+  }
+  return (
+    isLikelyExpressMiddleware(first) ||
+    isDeclaredFunctionLike(source, first) ||
+    (isSimpleIdentifier(first) && isImportedIdentifier(source, first))
+  );
+}
+
+function isLikelyExpressMiddleware(value: string): boolean {
+  return (
+    /^(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][A-Za-z0-9_$]*\s*=>)/u.test(value) ||
+    /(?:auth|authorize|guard|middleware|handler|validate|validator|schema|session|cookie|cors|helmet|parser|logger|compress|ratelimit|limiter|json|urlencoded|static)/iu.test(
+      value,
+    )
+  );
+}
+
+function isLikelyDynamicMountPrefix(source: string, value: string): boolean {
+  if (/(?:prefix|base|path|tenant|mount|route)/iu.test(value)) {
+    return true;
+  }
+  if (!isSimpleIdentifier(value)) {
+    return false;
+  }
+  const escapedName = escapeRegExp(value);
+  const pattern = new RegExp(
+    `${declarationPrefix.replace("([A-Za-z_$][A-Za-z0-9_$]*)", escapedName)}`,
+    "gu",
+  );
+  for (const match of source.matchAll(pattern)) {
+    if (isInsideCommentOrString(source, match.index ?? 0)) {
+      continue;
+    }
+    const valueStart = (match.index ?? 0) + match[0].length;
+    const assignedValue = source.slice(valueStart, valueStart + 200).split(/[;\n]/u)[0] ?? "";
+    if (/(?:prefix|base|path|tenant|mount|route)/iu.test(assignedValue)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isImportedIdentifier(source: string, name: string): boolean {
+  const escapedName = escapeRegExp(name);
+  const patterns = [
+    new RegExp(String.raw`\bimport\s+${escapedName}\b`, "gu"),
+    new RegExp(String.raw`\bimport\s+\*\s+as\s+${escapedName}\b`, "gu"),
+    new RegExp(
+      String.raw`\bimport\s*\{[^}]*\b(?:${escapedName}|[A-Za-z_$][A-Za-z0-9_$]*\s+as\s+${escapedName})\b[^}]*\}\s*from\b`,
+      "gu",
+    ),
+    new RegExp(String.raw`\b(?:const|let|var)\s+${escapedName}\s*=\s*require\s*\(`, "gu"),
+    new RegExp(
+      String.raw`\b(?:const|let|var)\s*\{[^}]*\b(?:${escapedName}|[A-Za-z_$][A-Za-z0-9_$]*\s*:\s*${escapedName})\b[^}]*\}\s*=\s*require\s*\(`,
+      "gu",
+    ),
+  ];
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      if (!isInsideCommentOrString(source, match.index ?? 0)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function isDeclaredFunctionLike(source: string, name: string): boolean {
+  if (!isSimpleIdentifier(name)) {
+    return false;
+  }
+  const escapedName = escapeRegExp(name);
+  const patterns = [
+    new RegExp(`\\b(?:async\\s+)?function\\s+${escapedName}\\s*\\(`, "gu"),
+    new RegExp(
+      `${declarationPrefix.replace("([A-Za-z_$][A-Za-z0-9_$]*)", escapedName)}(?:async\\s*)?(?:function\\b|\\([^)]*\\)\\s*=>|[A-Za-z_$][A-Za-z0-9_$]*\\s*=>)`,
+      "gu",
+    ),
+  ];
+  for (const pattern of patterns) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      if (!isInsideCommentOrString(source, match.index ?? 0)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function routePathsForTarget(
+  prefixes: RouteTargetPrefixes,
+  target: string,
+  routePath: string,
+): string[] {
+  const targetPrefixes = prefixes.prefixes.get(target) ?? [];
+  if (targetPrefixes.length > 0) {
+    return targetPrefixes.map((prefix) => joinRoutePaths(prefix, routePath));
+  }
+  if (prefixes.unknownTargets.has(target)) {
+    return [];
+  }
+  return [routePath];
+}
+
+function emptyRouteTargetPrefixes(): RouteTargetPrefixes {
+  return { prefixes: new Map(), unknownTargets: new Set() };
+}
+
+function singletonMountPrefix(source: string): string[] | null {
+  const literal = standaloneStringLiteral(source);
+  return literal === null ? null : [literal];
+}
+
+function standaloneMountPrefixes(source: string): string[] | null {
+  const literal = standaloneStringLiteral(source);
+  if (literal !== null) {
+    return [literal];
+  }
+  const arrayStart = skipWhitespace(source, 0);
+  if (source[arrayStart] !== "[") {
+    return null;
+  }
+  const arrayEnd = endOfArray(source, arrayStart + 1);
+  if (arrayEnd === null || nextRouteValueDelimiter(source, arrayEnd) !== null) {
+    return null;
+  }
+  const prefixes: string[] = [];
+  for (const element of splitTopLevelArguments(source.slice(arrayStart + 1, arrayEnd - 1))) {
+    const elementLiteral = standaloneStringLiteral(element);
+    if (elementLiteral === null) {
+      return null;
+    }
+    prefixes.push(elementLiteral);
+  }
+  return prefixes.length === 0 ? null : prefixes;
+}
+
+function standaloneStringLiteral(source: string): string | null {
+  const literal = readStringLiteralArgument(source, 0);
+  if (literal === null) {
+    return null;
+  }
+  return nextRouteValueDelimiter(source, literal.end) === null ? literal.value : null;
+}
+
+function isMountPrefix(path: string): boolean {
+  return path === "*" || path.startsWith("/");
+}
+
+function isSimpleIdentifier(value: string): boolean {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(value);
+}
+
+function joinRoutePaths(prefix: string, routePath: string): string {
+  const normalizedPrefix = prefix === "*" ? "/*" : prefix.replace(/\/+$/u, "") || "/";
+  if (normalizedPrefix === "/") {
+    return routePath;
+  }
+  if (routePath === "/") {
+    return normalizedPrefix;
+  }
+  if (routePath === "*") {
+    return `${normalizedPrefix}/*`;
+  }
+  return `${normalizedPrefix}/${routePath.replace(/^\/+/, "")}`;
 }
 
 function routeTargetNames(source: string, framework: ServerFramework): Set<string> {
@@ -317,7 +673,7 @@ function routeTargetNames(source: string, framework: ServerFramework): Set<strin
       ...declaredTargetNames(source, [
         new RegExp(`${declarationPrefix}(?:Fastify|fastify)${genericArguments}\\s*\\(`, "gu"),
       ]),
-      ...functionParameterTargets(source, "fastify"),
+      ...fastifyParameterTargets(source),
     ]);
   }
   return declaredTargetNames(source, [
@@ -484,33 +840,440 @@ function declaredTargetNames(source: string, patterns: RegExp[]): Set<string> {
   return names;
 }
 
-function functionParameterTargets(source: string, preferredName: string): Set<string> {
+function fastifyParameterTargets(source: string): Set<string> {
   const names = new Set<string>();
-  for (const pattern of [
-    /(?:async\s+)?function(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)/gu,
-    /(?:async\s*)?\(([^)]*)\)\s*=>/gu,
-  ]) {
-    pattern.lastIndex = 0;
-    for (const match of source.matchAll(pattern)) {
-      const matchIndex = match.index ?? 0;
-      if (isInsideCommentOrString(source, matchIndex)) {
-        continue;
-      }
-      for (const parameter of parameterNames(match[1] ?? "")) {
-        if (parameter === preferredName) {
-          names.add(parameter);
-        }
+  for (const callback of functionParameterCallbacks(source)) {
+    for (const parameter of callback.parameters) {
+      if (parameter.name === "fastify") {
+        names.add(parameter.name);
       }
     }
   }
   return names;
 }
 
-function parameterNames(parameters: string): string[] {
+function fastifyPluginCallTargetNames(source: string): Set<string> {
+  const names = new Set<string>();
+  for (const clause of fastifyPluginImportClauses(source)) {
+    addFastifyPluginImportNames(names, clause);
+  }
+  for (const pattern of [
+    /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)(?:\s*:\s*[^=;]+)?\s*=\s*require\s*\(\s*["']fastify-plugin["']\s*\)(?:\s*\.\s*default)?/gu,
+    /\bimport\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*require\s*\(\s*["']fastify-plugin["']\s*\)/gu,
+  ]) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      if (isInsideCommentOrString(source, match.index ?? 0)) {
+        continue;
+      }
+      const name = match[1];
+      if (name !== undefined) {
+        names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
+function fastifyPluginImportClauses(source: string): string[] {
+  const clauses: string[] = [];
+  const pattern = /\bimport\b/gu;
+  pattern.lastIndex = 0;
+  for (const match of source.matchAll(pattern)) {
+    const importIndex = match.index ?? 0;
+    if (
+      isInsideCommentOrString(source, importIndex) ||
+      !isImportDeclarationStart(source, importIndex)
+    ) {
+      continue;
+    }
+    const clause = readStaticImportClause(source, importIndex, "fastify-plugin");
+    if (clause !== null) {
+      clauses.push(clause);
+    }
+  }
+  return clauses;
+}
+
+function addFastifyPluginImportNames(names: Set<string>, clause: string): void {
+  const namespace = /^\*\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*)/u.exec(clause.trim())?.[1];
+  if (namespace !== undefined) {
+    names.add(namespace);
+    return;
+  }
+
+  const defaultName = /^([A-Za-z_$][A-Za-z0-9_$]*)\b/u.exec(clause.trim())?.[1];
+  if (defaultName !== undefined && defaultName !== "type") {
+    names.add(defaultName);
+  }
+
+  const named = /\{([^}]*)\}/u.exec(clause)?.[1];
+  if (named === undefined) {
+    return;
+  }
+  for (const part of named.split(",")) {
+    const binding = part.trim();
+    if (binding.startsWith("type ")) {
+      continue;
+    }
+    const match = /^(?:default|fastifyPlugin)(?:\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*))?$/u.exec(
+      binding,
+    );
+    if (match !== null) {
+      names.add(match[1] ?? binding);
+    }
+  }
+}
+
+function fastifyInstanceTypeNames(source: string): Set<string> {
+  const names = new Set<string>();
+  const pattern = /\bimport\b/gu;
+  pattern.lastIndex = 0;
+  for (const match of source.matchAll(pattern)) {
+    const importIndex = match.index ?? 0;
+    if (
+      isInsideCommentOrString(source, importIndex) ||
+      !isImportDeclarationStart(source, importIndex)
+    ) {
+      continue;
+    }
+    const clause = readFastifyStaticImportClause(source, importIndex);
+    if (clause !== null) {
+      addFastifyInstanceTypeNames(names, clause);
+    }
+  }
+  return names;
+}
+
+function addFastifyInstanceTypeNames(names: Set<string>, clause: string): void {
+  const named = /\{([^}]*)\}/u.exec(clause)?.[1];
+  if (named === undefined) {
+    return;
+  }
+  for (const part of named.split(",")) {
+    const binding = part.trim().replace(/^type\s+/u, "");
+    const match = /^FastifyInstance(?:\s+as\s+([A-Za-z_$][A-Za-z0-9_$]*))?$/u.exec(binding);
+    if (match !== null) {
+      names.add(match[1] ?? "FastifyInstance");
+    }
+  }
+}
+
+function readFastifyStaticImportClause(source: string, importIndex: number): string | null {
+  return readStaticImportClause(source, importIndex, "fastify");
+}
+
+function readStaticImportClause(
+  source: string,
+  importIndex: number,
+  moduleName: string,
+): string | null {
+  let cursor = importIndex + "import".length;
+  cursor = skipWhitespaceAndComments(source, cursor);
+  if (
+    source[cursor] === "(" ||
+    source[cursor] === "." ||
+    source[cursor] === "'" ||
+    source[cursor] === '"'
+  ) {
+    return null;
+  }
+  if (!isImportClauseStart(source[cursor])) {
+    return null;
+  }
+  const clauseStart = cursor;
+  const limit = Math.min(source.length, importIndex + 500);
+  while (cursor < limit) {
+    const char = source[cursor];
+    const next = source[cursor + 1];
+    if (char === undefined) {
+      break;
+    }
+    if (char === ";") {
+      return null;
+    }
+    if (char === "/" && next === "/") {
+      cursor = skipLineComment(source, cursor + 2);
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      cursor = skipBlockComment(source, cursor + 2);
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      cursor = skipQuoted(source, cursor, char);
+      continue;
+    }
+    if (isKeywordAt(source, cursor, "from")) {
+      const specifier = readImportSpecifier(source, cursor + "from".length);
+      if (specifier === null) {
+        cursor += "from".length;
+        continue;
+      }
+      return specifier.value === moduleName ? source.slice(clauseStart, cursor) : null;
+    }
+    cursor += 1;
+  }
+  return null;
+}
+
+function fastifyScopedCallbackRoutes(source: string, filePath: string): ServerRoute[] {
+  const pluginCallTargets = fastifyPluginCallTargetNames(source);
+  const instanceTypeNames = fastifyInstanceTypeNames(source);
+  const routes: ServerRoute[] = [];
+  for (const callback of [
+    ...functionParameterCallbacks(source),
+    ...inlineFastifyInstanceCallbacks(source),
+  ]) {
+    const targets = new Set<string>();
+    for (const [index, parameter] of callback.parameters.entries()) {
+      if (
+        isFastifyInstanceParameter(parameter.source, instanceTypeNames) ||
+        (pluginCallTargets.size > 0 &&
+          index === 0 &&
+          isInsideFastifyPluginCall(source, callback.index, pluginCallTargets))
+      ) {
+        targets.add(parameter.name);
+      }
+    }
+    if (targets.size === 0) {
+      continue;
+    }
+    const body = functionBodySource(source, callback.bodySearchStart);
+    if (body === null) {
+      continue;
+    }
+    routes.push(...directMethodRoutes(body, filePath, "fastify", targets));
+    routes.push(...fastifyRouteObjects(body, filePath, targets));
+  }
+  return routes;
+}
+
+function inlineFastifyInstanceCallbacks(source: string): Array<{
+  index: number;
+  bodySearchStart: number;
+  parameters: Array<{ name: string; source: string }>;
+}> {
+  const callbacks: Array<{
+    index: number;
+    bodySearchStart: number;
+    parameters: Array<{ name: string; source: string }>;
+  }> = [];
+  const functionPattern =
+    /(?:async\s+)?function(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*import\s*\(\s*["']fastify["']\s*\)\s*\.\s*FastifyInstance\b[^)]*\)/gu;
+  functionPattern.lastIndex = 0;
+  for (const match of source.matchAll(functionPattern)) {
+    const matchIndex = match.index ?? 0;
+    addInlineFastifyInstanceCallback(callbacks, source, matchIndex, match[0].length, match[1]);
+  }
+  const arrowPattern =
+    /(^|[^A-Za-z0-9_$])((?:async\s*)?\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*import\s*\(\s*["']fastify["']\s*\)\s*\.\s*FastifyInstance\b[^)]*\)\s*(?::\s*[^=]+?)?=>)/gu;
+  arrowPattern.lastIndex = 0;
+  for (const match of source.matchAll(arrowPattern)) {
+    const prefixLength = match[1]?.length ?? 0;
+    const callbackIndex = (match.index ?? 0) + prefixLength;
+    addInlineFastifyInstanceCallback(
+      callbacks,
+      source,
+      callbackIndex,
+      match[2]?.length ?? 0,
+      match[3],
+    );
+  }
+  return callbacks;
+}
+
+function addInlineFastifyInstanceCallback(
+  callbacks: Array<{
+    index: number;
+    bodySearchStart: number;
+    parameters: Array<{ name: string; source: string }>;
+  }>,
+  source: string,
+  callbackIndex: number,
+  matchLength: number,
+  name: string | undefined,
+): void {
+  if (name === undefined || isInsideCommentOrString(source, callbackIndex)) {
+    return;
+  }
+  callbacks.push({
+    index: callbackIndex,
+    bodySearchStart: callbackIndex + matchLength,
+    parameters: [
+      {
+        name,
+        source: `${name}: import("fastify").FastifyInstance`,
+      },
+    ],
+  });
+}
+
+function functionParameterCallbacks(source: string): Array<{
+  index: number;
+  bodySearchStart: number;
+  parameters: Array<{ name: string; source: string }>;
+}> {
+  const callbacks: Array<{
+    index: number;
+    bodySearchStart: number;
+    parameters: Array<{ name: string; source: string }>;
+  }> = [];
+  const functionPattern = /(?:async\s+)?function(?:\s+[A-Za-z_$][A-Za-z0-9_$]*)?\s*\(([^)]*)\)/gu;
+  functionPattern.lastIndex = 0;
+  for (const match of source.matchAll(functionPattern)) {
+    const matchIndex = match.index ?? 0;
+    addFunctionParameterCallback(callbacks, source, matchIndex, match[0].length, match[1]);
+  }
+  const arrowPattern = /(^|[^A-Za-z0-9_$])((?:async\s*)?\(([^()]*)\)\s*(?::\s*[^=]+?)?=>)/gu;
+  arrowPattern.lastIndex = 0;
+  for (const match of source.matchAll(arrowPattern)) {
+    const prefixLength = match[1]?.length ?? 0;
+    const callbackIndex = (match.index ?? 0) + prefixLength;
+    addFunctionParameterCallback(callbacks, source, callbackIndex, match[2]?.length ?? 0, match[3]);
+  }
+  const bareArrowPattern = /(^|[^A-Za-z0-9_$])((?:async\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*=>)/gu;
+  bareArrowPattern.lastIndex = 0;
+  for (const match of source.matchAll(bareArrowPattern)) {
+    const prefixLength = match[1]?.length ?? 0;
+    const callbackIndex = (match.index ?? 0) + prefixLength;
+    addFunctionParameterCallback(callbacks, source, callbackIndex, match[2]?.length ?? 0, match[3]);
+  }
+  return callbacks;
+}
+
+function addFunctionParameterCallback(
+  callbacks: Array<{
+    index: number;
+    bodySearchStart: number;
+    parameters: Array<{ name: string; source: string }>;
+  }>,
+  source: string,
+  callbackIndex: number,
+  matchLength: number,
+  parameters: string | undefined,
+): void {
+  if (isInsideCommentOrString(source, callbackIndex)) {
+    return;
+  }
+  callbacks.push({
+    index: callbackIndex,
+    bodySearchStart: callbackIndex + matchLength,
+    parameters: functionParameters(parameters ?? ""),
+  });
+}
+
+function functionBodySource(source: string, bodySearchStart: number): string | null {
+  let bodyStart = skipWhitespaceAndComments(source, bodySearchStart);
+  if (source[bodyStart] === ":") {
+    bodyStart = skipWhitespaceAndComments(source, skipFunctionReturnType(source, bodyStart + 1));
+  }
+  if (source[bodyStart] !== "{") {
+    return null;
+  }
+  const bodyEnd = endOfObject(source, bodyStart + 1);
+  return bodyEnd === null ? null : source.slice(bodyStart + 1, bodyEnd - 1);
+}
+
+function skipFunctionReturnType(source: string, start: number): number {
+  let quote: string | null = null;
+  let escaped = false;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let braceDepth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === undefined) {
+      return index;
+    }
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+    } else if (char === "(") {
+      parenDepth += 1;
+    } else if (char === ")") {
+      parenDepth = Math.max(0, parenDepth - 1);
+    } else if (char === "[") {
+      bracketDepth += 1;
+    } else if (char === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+    } else if (char === "{") {
+      if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+        const previous = previousSignificantChar(source, index - 1, start);
+        if (
+          previous !== ":" &&
+          previous !== "|" &&
+          previous !== "&" &&
+          previous !== "," &&
+          previous !== "<"
+        ) {
+          return index;
+        }
+      }
+      braceDepth += 1;
+    } else if (char === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+    }
+  }
+  return source.length;
+}
+
+function previousSignificantChar(source: string, start: number, lowerBound: number): string | null {
+  for (let index = start; index >= lowerBound; index -= 1) {
+    const char = source[index];
+    if (char !== undefined && !/\s/u.test(char)) {
+      return char;
+    }
+  }
+  return ":";
+}
+
+function functionParameters(parameters: string): Array<{ name: string; source: string }> {
   return parameters
     .split(",")
-    .map((parameter) => /^\.{0,3}\s*([A-Za-z_$][A-Za-z0-9_$]*)/u.exec(parameter.trim())?.[1])
-    .filter((parameter): parameter is string => parameter !== undefined);
+    .map((parameter) => {
+      const source = parameter.trim();
+      const name = /^\.{0,3}\s*([A-Za-z_$][A-Za-z0-9_$]*)/u.exec(source)?.[1];
+      return name === undefined ? null : { name, source };
+    })
+    .filter((parameter): parameter is { name: string; source: string } => parameter !== null);
+}
+
+function isFastifyInstanceParameter(
+  parameter: string,
+  instanceTypeNames: ReadonlySet<string>,
+): boolean {
+  if (/:\s*import\s*\(\s*["']fastify["']\s*\)\s*\.\s*FastifyInstance\b/u.test(parameter)) {
+    return true;
+  }
+  for (const name of instanceTypeNames) {
+    if (new RegExp(String.raw`:\s*${escapeRegExp(name)}\b`, "u").test(parameter)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isInsideFastifyPluginCall(
+  source: string,
+  functionIndex: number,
+  pluginCallTargets: ReadonlySet<string>,
+): boolean {
+  const prefix = source
+    .slice(Math.max(0, functionIndex - 500), functionIndex)
+    .replace(/\/\*[\s\S]*?\*\//gu, " ")
+    .replace(/\/\/[^\n\r]*/gu, " ");
+  const targetPattern = [...pluginCallTargets].map(escapeRegExp).join("|");
+  return new RegExp(`\\b(?:${targetPattern})${genericArguments}\\s*\\(\\s*$`, "u").test(prefix);
 }
 
 function isRouteTarget(targets: ReadonlySet<string>, target: string): boolean {
@@ -706,8 +1469,6 @@ function endOfCall(source: string, start: number): number | null {
         escaped = false;
       } else if (char === "\\") {
         escaped = true;
-      } else if (quote === "`" && char === "$" && source[index + 1] === "{") {
-        return null;
       } else if (char === quote) {
         quote = null;
       }
@@ -741,14 +1502,18 @@ function endOfObject(source: string, start: number): number | null {
         escaped = false;
       } else if (char === "\\") {
         escaped = true;
-      } else if (quote === "`" && char === "$" && source[index + 1] === "{") {
-        return null;
       } else if (char === quote) {
         quote = null;
       }
       continue;
     }
-    if (char === "'" || char === '"' || char === "`") {
+    if (char === "/" && source[index + 1] === "/") {
+      const newline = source.indexOf("\n", index + 2);
+      index = newline < 0 ? source.length : newline;
+    } else if (char === "/" && source[index + 1] === "*") {
+      const close = source.indexOf("*/", index + 2);
+      index = close < 0 ? source.length : close + 1;
+    } else if (char === "'" || char === '"' || char === "`") {
       quote = char;
     } else if (char === "{") {
       depth += 1;
@@ -756,6 +1521,48 @@ function endOfObject(source: string, start: number): number | null {
       depth -= 1;
       if (depth === 0) {
         return index + 1;
+      }
+    }
+  }
+  return null;
+}
+
+function endOfArray(source: string, start: number): number | null {
+  const stack = ["["];
+  let quote: string | null = null;
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === undefined) {
+      return null;
+    }
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+    } else if (char === "[" || char === "(" || char === "{") {
+      stack.push(char);
+    } else if (char === "]" || char === ")" || char === "}") {
+      const opener = stack.at(-1);
+      if (
+        (opener === "[" && char === "]") ||
+        (opener === "(" && char === ")") ||
+        (opener === "{" && char === "}")
+      ) {
+        stack.pop();
+        if (stack.length === 0) {
+          return index + 1;
+        }
+      } else {
+        return null;
       }
     }
   }
@@ -805,6 +1612,57 @@ function isRoutePath(path: string): boolean {
   return path === "*" || path.startsWith("/");
 }
 
+function readStringPropertyValues(source: string, property: string): string[] {
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const pattern = new RegExp(String.raw`(?:^|[,{}]\s*)${escapedProperty}\s*:`, "gu");
+  for (const match of source.matchAll(pattern)) {
+    const valueStart = (match.index ?? 0) + match[0].length;
+    const literal = readStringLiteralArgument(source, valueStart);
+    if (literal !== null) {
+      const delimiter = nextRoutePropertyDelimiter(source, literal.end);
+      if (delimiter === "," || delimiter === "}") {
+        return [literal.value];
+      }
+      continue;
+    }
+    const array = readStringArrayLiteral(source, valueStart);
+    if (array === null) {
+      continue;
+    }
+    const delimiter = nextRoutePropertyDelimiter(source, array.end);
+    if (delimiter === "," || delimiter === "}") {
+      return array.values;
+    }
+  }
+  return [];
+}
+
+function readStringArrayLiteral(
+  source: string,
+  start: number,
+): { values: string[]; end: number } | null {
+  const arrayStart = skipWhitespace(source, start);
+  if (source[arrayStart] !== "[") {
+    return null;
+  }
+  const arrayEnd = endOfArray(source, arrayStart + 1);
+  if (arrayEnd === null) {
+    return null;
+  }
+  const values: string[] = [];
+  for (const element of splitTopLevelArguments(source.slice(arrayStart + 1, arrayEnd - 1))) {
+    const literal = readStringLiteralArgument(element, 0);
+    if (literal === null) {
+      continue;
+    }
+    const delimiter = nextRouteValueDelimiter(element, literal.end);
+    if (delimiter === null) {
+      values.push(literal.value);
+    }
+  }
+  return { values, end: arrayEnd };
+}
+
 function readStringProperty(source: string, property: string): string | null {
   const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const pattern = new RegExp(String.raw`(?:^|[,{]\s*)${escapedProperty}\s*:`, "gu");
@@ -813,12 +1671,67 @@ function readStringProperty(source: string, property: string): string | null {
     if (literal === null) {
       continue;
     }
-    const delimiter = nextRouteValueDelimiter(source, literal.end);
+    const delimiter = nextRoutePropertyDelimiter(source, literal.end);
     if (delimiter === "," || delimiter === "}") {
       return literal.value;
     }
   }
   return null;
+}
+
+function nextRoutePropertyDelimiter(source: string, start: number): string | null {
+  const suffixEnd = skipTypeScriptValueSuffix(source, start);
+  return nextRouteValueDelimiter(source, suffixEnd);
+}
+
+function skipTypeScriptValueSuffix(source: string, start: number): number {
+  let cursor = skipWhitespaceAndComments(source, start);
+  if (isKeywordAt(source, cursor, "as")) {
+    cursor = skipWhitespaceAndComments(source, cursor + "as".length);
+    if (isKeywordAt(source, cursor, "const")) {
+      return skipWhitespaceAndComments(source, cursor + "const".length);
+    }
+    return start;
+  }
+  if (isKeywordAt(source, cursor, "satisfies")) {
+    return skipTypeSuffix(source, cursor + "satisfies".length);
+  }
+  return start;
+}
+
+function skipTypeSuffix(source: string, start: number): number {
+  let quote: string | null = null;
+  let escaped = false;
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === undefined) {
+      return index;
+    }
+    if (quote !== null) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+    } else if (char === "(" || char === "[" || char === "{") {
+      depth += 1;
+    } else if (char === ")" || char === "]" || char === "}") {
+      if (depth === 0) {
+        return index;
+      }
+      depth -= 1;
+    } else if (char === "," && depth === 0) {
+      return index;
+    }
+  }
+  return source.length;
 }
 
 function readIdentifierProperty(source: string, property: string): string | null {
