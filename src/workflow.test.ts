@@ -229,9 +229,23 @@ describe("workflow", () => {
     });
     expect(() => parseArgs(["show"])).toThrow("missing --finding");
     expect(() => parseArgs(["triage", "--status", "fixed"])).toThrow("missing --finding");
-    expect(() => parseArgs(["revalidate"])).toThrow("missing --finding or --all");
+    expect(() => parseArgs(["revalidate"])).toThrow(
+      "missing --finding, --all, --since, or --include-dirty",
+    );
+    expect(() => parseArgs(["revalidate", "--finding", ""])).toThrow(
+      "missing --finding, --all, --since, or --include-dirty",
+    );
+    expect(() => parseArgs(["revalidate", "--since", ""])).toThrow(
+      "missing --finding, --all, --since, or --include-dirty",
+    );
+    expect(parseArgs(["revalidate", "--finding", "f"]).flags).toMatchObject({
+      finding: "f",
+    });
     expect(parseArgs(["revalidate", "--all"]).flags).toMatchObject({
       all: true,
+    });
+    expect(parseArgs(["revalidate", "--include-dirty"]).flags).toMatchObject({
+      includeDirty: true,
     });
   });
 
@@ -351,7 +365,10 @@ describe("workflow", () => {
     expect(parseArgs(["revalidate", "--since", "origin/main"]).flags).toMatchObject({
       since: "origin/main",
     });
-    expect(parseArgs(["revalidate", "--include-dirty"]).flags).toMatchObject({
+    expect(
+      parseArgs(["revalidate", "--since", "origin/main", "--include-dirty"]).flags,
+    ).toMatchObject({
+      since: "origin/main",
       includeDirty: true,
     });
     expect(
