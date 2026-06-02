@@ -190,7 +190,7 @@ Unknown flags fail fast.
 
 - `total` and `items` are the canonical keys.
 - `results` is an alias for `items` with the same array for parity with `{count, results}` consumers.
-- `findings: <number>` is kept for backwards compatibility but is **deprecated**. Note that in `--json` output `findings` is a _count_, not the array — use `items` (or `results`) for the array. The next breaking release (v0.4) will drop `findings: <number>` and `results`, landing on `{ total, items, output }`.
+- `findings: <number>` is kept for backwards compatibility but is **deprecated**. Note that in `--json` output `findings` is a _count_, not the array — use `items` (or `results`) for the array. Future breaking releases may drop `findings: <number>` and `results`, landing on `{ total, items, output }`.
 
 ## State
 
