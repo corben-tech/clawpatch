@@ -47,7 +47,7 @@ export function extractJson(text: string): unknown | null {
       }
     }
     if (depth !== 0) {
-      firstBrace = -1;
+      firstBrace = text.indexOf("{", firstBrace + 1);
     }
   }
   return null;
