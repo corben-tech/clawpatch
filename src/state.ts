@@ -14,6 +14,7 @@ import {
   patchAttemptSchema,
   projectRecordSchema,
   runRecordSchema,
+  stateRecordIdSchema,
 } from "./types.js";
 
 export type StatePaths = {
@@ -70,11 +71,14 @@ export async function readFeatures(paths: StatePaths): Promise<FeatureRecord[]> 
 }
 
 export async function readFeature(paths: StatePaths, id: string): Promise<FeatureRecord | null> {
+  const featureId = validateStateRecordId("feature", id);
   const path = featurePath(paths, id);
   if (!(await pathExists(path))) {
     return null;
   }
-  return readJson(path, featureRecordSchema);
+  const feature = await readJson(path, featureRecordSchema);
+  assertRecordIdMatches("feature", featureId, feature.featureId);
+  return feature;
 }
 
 export async function writeFeature(paths: StatePaths, feature: FeatureRecord): Promise<void> {
@@ -156,6 +160,7 @@ export async function readFeatureLockIds(paths: StatePaths): Promise<string[]> {
   return names
     .filter((name) => name.endsWith(".json"))
     .map((name) => name.slice(0, -".json".length))
+    .filter((id) => stateRecordIdSchema.safeParse(id).success)
     .toSorted();
 }
 
@@ -164,19 +169,22 @@ export async function readFindings(paths: StatePaths): Promise<FindingRecord[]> 
 }
 
 export async function readFinding(paths: StatePaths, id: string): Promise<FindingRecord | null> {
-  const path = join(paths.findings, `${id}.json`);
+  const findingId = validateStateRecordId("finding", id);
+  const path = findingPath(paths, id);
   if (!(await pathExists(path))) {
     return null;
   }
-  return readJson(path, findingRecordSchema);
+  const finding = await readJson(path, findingRecordSchema);
+  assertRecordIdMatches("finding", findingId, finding.findingId);
+  return finding;
 }
 
 export async function writeFinding(paths: StatePaths, finding: FindingRecord): Promise<void> {
-  await writeJson(join(paths.findings, `${finding.findingId}.json`), finding);
+  await writeJson(findingPath(paths, finding.findingId), finding);
 }
 
 export async function writeRun(paths: StatePaths, run: RunRecord): Promise<void> {
-  await writeJson(join(paths.runs, `${run.runId}.json`), run);
+  await writeJson(runPath(paths, run.runId), run);
 }
 
 export async function readRuns(paths: StatePaths): Promise<RunRecord[]> {
@@ -184,7 +192,7 @@ export async function readRuns(paths: StatePaths): Promise<RunRecord[]> {
 }
 
 export async function writePatchAttempt(paths: StatePaths, patch: PatchAttempt): Promise<void> {
-  await writeJson(join(paths.patches, `${patch.patchAttemptId}.json`), patch);
+  await writeJson(patchPath(paths, patch.patchAttemptId), patch);
 }
 
 export async function readPatchAttempts(paths: StatePaths): Promise<PatchAttempt[]> {
@@ -207,11 +215,45 @@ async function readRecords<T>(dir: string, schema: z.ZodType<T>): Promise<T[]> {
 }
 
 function featurePath(paths: StatePaths, featureId: string): string {
-  return join(paths.features, `${featureId}.json`);
+  return stateRecordPath(paths.features, "feature", featureId);
 }
 
 function featureLockPath(paths: StatePaths, featureId: string): string {
-  return join(paths.locks, `${featureId}.json`);
+  return stateRecordPath(paths.locks, "feature lock", featureId);
+}
+
+function findingPath(paths: StatePaths, findingId: string): string {
+  return stateRecordPath(paths.findings, "finding", findingId);
+}
+
+function runPath(paths: StatePaths, runId: string): string {
+  return stateRecordPath(paths.runs, "run", runId);
+}
+
+function patchPath(paths: StatePaths, patchAttemptId: string): string {
+  return stateRecordPath(paths.patches, "patch attempt", patchAttemptId);
+}
+
+function stateRecordPath(dir: string, kind: string, id: string): string {
+  return join(dir, `${validateStateRecordId(kind, id)}.json`);
+}
+
+function validateStateRecordId(kind: string, id: string): string {
+  const parsed = stateRecordIdSchema.safeParse(id);
+  if (!parsed.success) {
+    throw new ClawpatchError(`invalid ${kind} id: ${id}`, 2, "invalid-state-id");
+  }
+  return parsed.data;
+}
+
+function assertRecordIdMatches(kind: string, requested: string, actual: string): void {
+  if (actual !== requested) {
+    throw new ClawpatchError(
+      `${kind} record id mismatch: requested ${requested}, found ${actual}`,
+      2,
+      "state-id-mismatch",
+    );
+  }
 }
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
