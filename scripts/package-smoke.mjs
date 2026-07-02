@@ -88,6 +88,10 @@ try {
       stdio: "pipe",
     }),
   );
+  const packedFiles = packFilePaths(packOutput);
+  if (!packedFiles.has("docs/spec.md")) {
+    throw new Error("expected package to include docs/spec.md referenced by README.md");
+  }
   const tarball = join(tmp, packFilename(packOutput));
   const dependencyPaths = runtimeDependencyPaths();
   mkdirSync(installRoot, { recursive: true });
@@ -152,6 +156,14 @@ function packFilename(output) {
     throw new Error("npm pack did not report a tarball filename");
   }
   return filename;
+}
+
+function packFilePaths(output) {
+  const files = Array.isArray(output) ? output[0]?.files : null;
+  if (!Array.isArray(files)) {
+    throw new Error("npm pack did not report package files");
+  }
+  return new Set(files.map((file) => file?.path).filter((path) => typeof path === "string"));
 }
 
 function runtimeDependencyPaths() {
