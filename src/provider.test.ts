@@ -181,6 +181,17 @@ describe("extractJson", () => {
     });
   });
 
+  it("skips unbalanced malformed preambles before valid JSON", () => {
+    const input =
+      'thinking { unfinished note final {"outcome":"fixed","reasoning":"ok","commands":[]}';
+
+    expect(extractJson(input)).toEqual({
+      outcome: "fixed",
+      reasoning: "ok",
+      commands: [],
+    });
+  });
+
   it("does not parse nested JSON from malformed preambles", () => {
     const input =
       'draft { outer: {"outcome":"draft","reasoning":"x","commands":[]} } final ' +
