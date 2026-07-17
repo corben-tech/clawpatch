@@ -119,6 +119,14 @@ export const projectRecordSchema = z.object({
 
 export type ProjectRecord = z.infer<typeof projectRecordSchema>;
 
+export function isSafeStateRecordId(value: string): boolean {
+  return /^[A-Za-z0-9_-]+$/u.test(value) && value !== "." && value !== "..";
+}
+
+export const stateRecordIdSchema = z.string().min(1).refine(isSafeStateRecordId, {
+  message: "state record IDs may only contain letters, numbers, underscores, and hyphens",
+});
+
 export const configSchema = z.object({
   schemaVersion: z.literal(1),
   stateDir: z.string(),
@@ -163,7 +171,7 @@ export const featureTestRefSchema = z.object({
 });
 
 export const analysisEntrySchema = z.object({
-  runId: z.string(),
+  runId: stateRecordIdSchema,
   kind: z.string(),
   summary: z.string(),
   provider: z.string().nullable(),
@@ -173,7 +181,7 @@ export const analysisEntrySchema = z.object({
 });
 
 export const featureLockSchema = z.object({
-  lockedByRunId: z.string(),
+  lockedByRunId: stateRecordIdSchema,
   lockedAt: z.string(),
   hostname: z.string(),
   pid: z.number().int(),
@@ -181,7 +189,7 @@ export const featureLockSchema = z.object({
 
 export const featureRecordSchema = z.object({
   schemaVersion: z.literal(1),
-  featureId: z.string(),
+  featureId: stateRecordIdSchema,
   title: z.string(),
   summary: z.string(),
   kind: z.enum(featureKinds),
@@ -195,8 +203,8 @@ export const featureRecordSchema = z.object({
   trustBoundaries: z.array(z.enum(trustBoundaries)),
   status: z.enum(featureStatuses),
   lock: featureLockSchema.nullable(),
-  findingIds: z.array(z.string()),
-  patchAttemptIds: z.array(z.string()),
+  findingIds: z.array(stateRecordIdSchema),
+  patchAttemptIds: z.array(stateRecordIdSchema),
   analysisHistory: z.array(analysisEntrySchema),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -223,7 +231,7 @@ export const evidenceRefSchema = z
   );
 
 export const findingHistoryEntrySchema = z.object({
-  runId: z.string().nullable(),
+  runId: stateRecordIdSchema.nullable(),
   kind: z.string(),
   status: z.enum(["open", "false-positive", "fixed", "wont-fix", "uncertain"]).nullable(),
   note: z.string().nullable(),
@@ -237,8 +245,8 @@ export type FindingHistoryEntry = z.infer<typeof findingHistoryEntrySchema>;
 export const findingRecordSchema = z
   .object({
     schemaVersion: z.literal(1),
-    findingId: z.string(),
-    featureId: z.string(),
+    findingId: stateRecordIdSchema,
+    featureId: stateRecordIdSchema,
     title: z.string(),
     category: z.enum(findingCategories),
     severity: z.enum(["critical", "high", "medium", "low"]),
@@ -254,8 +262,8 @@ export const findingRecordSchema = z
     status: z.enum(["open", "false-positive", "fixed", "wont-fix", "uncertain"]),
     history: z.array(findingHistoryEntrySchema).optional(),
     signature: z.string(),
-    linkedPatchAttemptIds: z.array(z.string()),
-    createdByRunId: z.string(),
+    linkedPatchAttemptIds: z.array(stateRecordIdSchema),
+    createdByRunId: stateRecordIdSchema,
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -283,9 +291,9 @@ export type CommandResult = z.infer<typeof commandResultSchema>;
 
 export const patchAttemptSchema = z.object({
   schemaVersion: z.literal(1),
-  patchAttemptId: z.string(),
-  findingIds: z.array(z.string()),
-  featureIds: z.array(z.string()),
+  patchAttemptId: stateRecordIdSchema,
+  findingIds: z.array(stateRecordIdSchema),
+  featureIds: z.array(stateRecordIdSchema),
   status: z.enum(["planned", "applying", "applied", "validated", "failed", "abandoned"]),
   plan: z.string(),
   filesChanged: z.array(z.string()),
@@ -315,7 +323,7 @@ export type PatchAttempt = z.infer<typeof patchAttemptSchema>;
 
 export const runRecordSchema = z.object({
   schemaVersion: z.literal(1),
-  runId: z.string(),
+  runId: stateRecordIdSchema,
   command: z.string(),
   args: z.array(z.string()),
   rootPath: z.string(),
@@ -323,9 +331,9 @@ export const runRecordSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().nullable(),
   status: z.enum(["running", "completed", "failed", "cancelled"]),
-  claimedFeatureIds: z.array(z.string()),
-  findingIds: z.array(z.string()),
-  patchAttemptIds: z.array(z.string()),
+  claimedFeatureIds: z.array(stateRecordIdSchema),
+  findingIds: z.array(stateRecordIdSchema),
+  patchAttemptIds: z.array(stateRecordIdSchema),
   errors: z.array(
     z.object({
       message: z.string(),
