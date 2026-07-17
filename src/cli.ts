@@ -298,14 +298,16 @@ function validateCommandRequirements(
       throw new ClawpatchError(`missing --${kebab(flag)}`, 2, "invalid-usage");
     }
   }
-  if (
-    command === "revalidate" &&
-    typeof flags["finding"] !== "string" &&
-    flags["all"] !== true &&
-    typeof flags["since"] !== "string" &&
-    flags["includeDirty"] !== true
-  ) {
-    throw new ClawpatchError("missing --finding or --all", 2, "invalid-usage");
+  if (command === "revalidate") {
+    const hasFinding = typeof flags["finding"] === "string" && flags["finding"].length > 0;
+    const hasSince = typeof flags["since"] === "string" && flags["since"].length > 0;
+    if (!hasFinding && flags["all"] !== true && !hasSince && flags["includeDirty"] !== true) {
+      throw new ClawpatchError(
+        "missing --finding, --all, --since, or --include-dirty",
+        2,
+        "invalid-usage",
+      );
+    }
   }
   if (
     command === "review" &&
@@ -585,7 +587,9 @@ Flags:
 
 Usage:
   clawpatch revalidate --finding <id> [flags]
+  clawpatch revalidate --all [flags]
   clawpatch revalidate --since <ref> [flags]
+  clawpatch revalidate --include-dirty [flags]
 
 Flags:
   --finding <id>
